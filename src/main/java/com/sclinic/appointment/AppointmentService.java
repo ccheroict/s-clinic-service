@@ -6,6 +6,7 @@ import com.sclinic.appointment.dto.AppointmentUpdateRequest;
 import com.sclinic.appointment.dto.StatusUpdateRequest;
 import com.sclinic.appointment.exception.NotEditableException;
 import com.sclinic.audit.AuditAction;
+import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
 import com.sclinic.common.exception.NotFoundException;
 import com.sclinic.patient.Patient;
@@ -22,9 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -108,25 +106,25 @@ public class AppointmentService {
             throw new NotEditableException(appointment.getStatus());
         }
 
-        // Track changed fields for audit
-        Map<String, Object> changedFields = new HashMap<>();
+        // Track which fields changed, by name only. This used to store the old
+        // and new values, including `reason` and `note`, which are free-text
+        // clinical notes: the audit table was quietly becoming a second,
+        // unprotected copy of the patient's health data that outlived the record
+        // itself. See AuditDetail.
+        AuditDetail auditDetail = AuditDetail.builder();
 
         // 3. Update allowed fields from request
         boolean timeChanged = false;
         boolean doctorChanged = false;
 
         if (request.scheduledAt() != null && !request.scheduledAt().equals(appointment.getScheduledAt())) {
-            changedFields.put("scheduledAt", Map.of(
-                    "old", appointment.getScheduledAt().toString(),
-                    "new", request.scheduledAt().toString()));
+            auditDetail.changed("scheduledAt");
             appointment.setScheduledAt(request.scheduledAt());
             timeChanged = true;
         }
 
         if (request.durationMin() != null && request.durationMin() != appointment.getDurationMin()) {
-            changedFields.put("durationMin", Map.of(
-                    "old", appointment.getDurationMin(),
-                    "new", request.durationMin()));
+            auditDetail.changed("durationMin");
             appointment.setDurationMin(request.durationMin());
             timeChanged = true;
         }
@@ -139,24 +137,18 @@ public class AppointmentService {
                 throw new IllegalArgumentException(
                         "Staff member " + request.doctorId() + " does not have DOCTOR role");
             }
-            changedFields.put("doctorId", Map.of(
-                    "old", Objects.toString(appointment.getDoctorId(), null),
-                    "new", request.doctorId().toString()));
+            auditDetail.changed("doctorId");
             appointment.setDoctorId(request.doctorId());
             doctorChanged = true;
         }
 
         if (request.reason() != null && !request.reason().equals(appointment.getReason())) {
-            changedFields.put("reason", Map.of(
-                    "old", Objects.toString(appointment.getReason(), ""),
-                    "new", request.reason()));
+            auditDetail.changed("reason");
             appointment.setReason(request.reason());
         }
 
         if (request.note() != null && !request.note().equals(appointment.getNote())) {
-            changedFields.put("note", Map.of(
-                    "old", Objects.toString(appointment.getNote(), ""),
-                    "new", request.note()));
+            auditDetail.changed("note");
             appointment.setNote(request.note());
         }
 
@@ -182,9 +174,8 @@ public class AppointmentService {
         // 7. Save updated appointment
         Appointment saved = appointmentRepository.saveAndFlush(appointment);
 
-        // 8. Record audit log (UPDATE with changed fields)
-        auditService.record(AuditAction.UPDATE, ENTITY_TYPE, saved.getId(),
-                changedFields.isEmpty() ? null : changedFields);
+        // 8. Record audit log (UPDATE with the names of the changed fields)
+        auditService.record(AuditAction.UPDATE, ENTITY_TYPE, saved.getId(), auditDetail.build());
 
         // 9. Map to AppointmentResponse
         Patient patient = patientRepository.findById(saved.getPatientId())
@@ -222,9 +213,14 @@ public class AppointmentService {
         appointment.setStatus(request.status());
         Appointment saved = appointmentRepository.saveAndFlush(appointment);
 
-        // 5. Record audit (UPDATE with oldStatus/newStatus)
+        // 5. Record audit. The status transition is kept in full, unlike other
+        // fields: it is a closed set of codes with nothing personal in it, and
+        // the direction of the change is the single most useful fact about an
+        // appointment after the event.
         auditService.record(AuditAction.UPDATE, ENTITY_TYPE, saved.getId(),
-                Map.of("status", oldStatus.name() + " → " + request.status().name()));
+                AuditDetail.builder()
+                        .transition("status", oldStatus, request.status())
+                        .build());
 
         // 6. Map to AppointmentResponse
         Patient patient = patientRepository.findById(saved.getPatientId())

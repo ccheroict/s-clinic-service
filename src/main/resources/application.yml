@@ -5,6 +5,20 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/sclinic}
     username: ${DB_USER:sclinic}
     password: ${DB_PASSWORD:sclinic}
+    hikari:
+      # Sized deliberately rather than left at the default of 10.
+      #
+      # Several flows deliberately open a second transaction that commits
+      # independently of the request: audit entries and authentication events must
+      # survive the rollback that a rejected request causes. A suspended
+      # transaction keeps its connection, so those requests hold two connections at
+      # once, and audit writes queue on a single row lock while holding both. At a
+      # pool of 10 that runs dry under a burst of failed logins, which surfaces as
+      # "could not open JPA EntityManager" rather than as anything that points at
+      # the cause.
+      maximum-pool-size: ${DB_POOL_SIZE:30}
+      # Fail fast rather than leaving a request hanging for half a minute.
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:10000}
   jpa:
     hibernate:
       ddl-auto: validate          # schema is owned by Flyway, never auto-generated
@@ -22,3 +36,46 @@ server:
 logging:
   level:
     org.hibernate.SQL: debug
+
+sclinic:
+  auth:
+    # Session lifetime for a fully authenticated staff member.
+    session-ttl: ${AUTH_SESSION_TTL:PT8H}
+    # Lifetime of a half-finished login (change-password / MFA steps). Short on
+    # purpose: it only has to survive one more request.
+    interim-token-ttl: ${AUTH_INTERIM_TOKEN_TTL:PT10M}
+    max-failed-attempts: ${AUTH_MAX_FAILED_ATTEMPTS:5}
+    lockout-duration: ${AUTH_LOCKOUT_DURATION:PT15M}
+    password-history-size: ${AUTH_PASSWORD_HISTORY_SIZE:5}
+    min-password-length: ${AUTH_MIN_PASSWORD_LENGTH:12}
+    # Roles that must clear a TOTP challenge. Leave empty only for local testing:
+    # these are the roles that can open a patient record.
+    mfa-required-roles: ${AUTH_MFA_REQUIRED_ROLES:ADMIN,DOCTOR}
+    # 30-second steps accepted either side of now, to tolerate phone clock drift.
+    totp-window-steps: ${AUTH_TOTP_WINDOW_STEPS:1}
+    backup-code-count: ${AUTH_BACKUP_CODE_COUNT:10}
+    totp-issuer: ${AUTH_TOTP_ISSUER:S-Clinic}
+
+  bootstrap:
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+    # Leave empty to generate a random password, printed to the log once on first
+    # startup. Never set this to a well-known value.
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+
+  # Seeded into the facility table on first startup only. After that, edit via
+  # PUT /api/facility so changes are audited. Values here are placeholders --
+  # replace kcb-code, interop-code and the einvoice-* block with the real ones
+  # from the health authority, the national e-prescription system and VNPT.
+  facility:
+    name: ${FACILITY_NAME:Phong kham da lieu S-Clinic}
+    kcb-code: ${FACILITY_KCB_CODE:PENDING-KCB-CODE}
+    interop-code: ${FACILITY_INTEROP_CODE:}
+    tax-code: ${FACILITY_TAX_CODE:}
+    address: ${FACILITY_ADDRESS:}
+    phone: ${FACILITY_PHONE:}
+    email: ${FACILITY_EMAIL:}
+    license-no: ${FACILITY_LICENSE_NO:}
+    technical-director: ${FACILITY_TECHNICAL_DIRECTOR:}
+    einvoice-template-code: ${EINVOICE_TEMPLATE_CODE:}
+    einvoice-serial: ${EINVOICE_SERIAL:}
+    einvoice-unit-code: ${EINVOICE_UNIT_CODE:}

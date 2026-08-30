@@ -4,6 +4,10 @@ import com.sclinic.appointment.exception.BusinessHoursException;
 import com.sclinic.appointment.exception.ConflictException;
 import com.sclinic.appointment.exception.InvalidStatusTransitionException;
 import com.sclinic.appointment.exception.NotEditableException;
+import com.sclinic.security.AuthenticationFailedException;
+import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
+import com.sclinic.security.mfa.MfaFailedException;
+import com.sclinic.security.password.WeakPasswordException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +25,47 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     public ProblemDetail handleNotFound(NotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /**
+     * Rejected authentication. The message is uniform by design so callers cannot
+     * distinguish an unknown account from a wrong password from a locked account.
+     */
+    @ExceptionHandler(AuthenticationFailedException.class)
+    public ProblemDetail handleAuthenticationFailed(AuthenticationFailedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
+    /** A proposed password failed the policy; the rule is named, never the password. */
+    @ExceptionHandler(WeakPasswordException.class)
+    public ProblemDetail handleWeakPassword(WeakPasswordException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** A second-factor challenge was refused. */
+    @ExceptionHandler(MfaFailedException.class)
+    public ProblemDetail handleMfaFailed(MfaFailedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
+    /**
+     * Enrolment attempted on an account that already has a second factor. A
+     * conflict rather than a rejection: the credentials were fine, the account is
+     * simply not in a state where enrolling is allowed.
+     */
+    @ExceptionHandler(MfaAlreadyEnrolledException.class)
+    public ProblemDetail handleMfaAlreadyEnrolled(MfaAlreadyEnrolledException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * Service-layer argument rejections (e.g. staff without the DOCTOR role,
+     * duplicate facility code). These are client mistakes, not server faults,
+     * so they must not surface as 500.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
