@@ -4,6 +4,7 @@ import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
 import com.sclinic.common.exception.NotFoundException;
+import com.sclinic.crypto.BlindIndex;
 import com.sclinic.patient.dto.PatientDeleteRequest;
 import com.sclinic.patient.dto.PatientRequest;
 import com.sclinic.patient.dto.PatientResponse;
@@ -47,6 +48,7 @@ public class PatientService {
     private final AuditService auditService;
     private final RetentionCalculator retentionCalculator;
     private final StaffRepository staffRepository;
+    private final BlindIndex blindIndex;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -67,6 +69,7 @@ public class PatientService {
     @Transactional
     public PatientResponse create(PatientRequest request) {
         Patient patient = mapper.toEntity(request);
+        patient.setNationalIdHash(blindIndex.of(patient.getNationalId()));
         // flush so DB-/Hibernate-generated values (timestamps) are populated in the response
         Patient saved = repository.saveAndFlush(patient);
 
@@ -86,6 +89,10 @@ public class PatientService {
 
         mapper.updateEntity(request, patient);
         rejectFutureDateOfDeath(patient.getDeceasedOn());
+
+        // The encrypted column cannot be searched, so the lookup index has to be
+        // rewritten whenever the number behind it changes.
+        patient.setNationalIdHash(blindIndex.of(patient.getNationalId()));
 
         // A newly recorded date of death starts a different retention clock where
         // the policy defines one, so the date has to be recomputed rather than

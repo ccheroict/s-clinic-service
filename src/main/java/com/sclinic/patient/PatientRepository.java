@@ -27,6 +27,15 @@ public interface PatientRepository extends JpaRepository<Patient, UUID> {
     /** For the business API: a withdrawn record is gone as far as it is concerned. */
     Optional<Patient> findByIdAndDeletedAtIsNull(UUID id);
 
+    /**
+     * Exact lookup by national identity number.
+     *
+     * <p>Takes the blind index, not the number: the encrypted column uses a fresh
+     * IV per write, so comparing ciphertext can never match. See
+     * {@code BlindIndex}.
+     */
+    Optional<Patient> findByNationalIdHashAndDeletedAtIsNull(String nationalIdHash);
+
     Page<Patient> findByDeletedAtIsNull(Pageable pageable);
 
     /**

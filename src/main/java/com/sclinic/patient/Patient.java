@@ -1,6 +1,8 @@
 package com.sclinic.patient;
 
+import com.sclinic.crypto.EncryptedStringConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
@@ -49,15 +51,32 @@ public class Patient {
     private String allergies;
     private String note;
 
-    // V2 integration-readiness identifiers
-    @Column(name = "national_id")
+    // ---------- Identity numbers, encrypted at rest (V9) ----------
+    //
+    // These identify a person outright, so a leaked dump containing them is a
+    // different order of harm from one containing appointment times. Mapped to
+    // the *_enc columns added by V9; the original plaintext columns stay in the
+    // database, unmapped, until V10 drops them in a later release.
+
+    @Convert(converter = EncryptedStringConverter.class)
+    @Column(name = "national_id_enc")
     private String nationalId;     // CCCD/CMND
 
-    @Column(name = "insurance_no")
+    @Convert(converter = EncryptedStringConverter.class)
+    @Column(name = "insurance_no_enc")
     private String insuranceNo;    // BHYT
 
-    @Column(name = "tax_code")
+    @Convert(converter = EncryptedStringConverter.class)
+    @Column(name = "tax_code_enc")
     private String taxCode;
+
+    /**
+     * Keyed hash of {@link #nationalId}, maintained by {@code PatientService}.
+     * The encrypted column cannot be searched, so exact lookup by CCCD goes
+     * through this. See {@code BlindIndex}.
+     */
+    @Column(name = "national_id_hash")
+    private String nationalIdHash;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

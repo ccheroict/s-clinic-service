@@ -3,6 +3,7 @@ package com.sclinic.patient;
 import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditService;
 import com.sclinic.common.exception.NotFoundException;
+import com.sclinic.crypto.BlindIndex;
 import com.sclinic.patient.dto.PatientDeleteRequest;
 import com.sclinic.patient.dto.PatientRequest;
 import com.sclinic.patient.dto.PatientResponse;
@@ -37,6 +38,7 @@ class PatientServiceTest {
     private AuditService auditService;
     private RetentionCalculator retentionCalculator;
     private StaffRepository staffRepository;
+    private BlindIndex blindIndex;
     private PatientService service;
 
     @BeforeEach
@@ -45,6 +47,7 @@ class PatientServiceTest {
         auditService = Mockito.mock(AuditService.class);
         retentionCalculator = Mockito.mock(RetentionCalculator.class);
         staffRepository = Mockito.mock(StaffRepository.class);
+        blindIndex = Mockito.mock(BlindIndex.class);
 
         service = new PatientService(
                 repository,
@@ -52,6 +55,7 @@ class PatientServiceTest {
                 auditService,
                 retentionCalculator,
                 staffRepository,
+                blindIndex,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

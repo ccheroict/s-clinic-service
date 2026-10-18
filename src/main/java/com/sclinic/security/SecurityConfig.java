@@ -1,5 +1,6 @@
 package com.sclinic.security;
 
+import com.sclinic.crypto.DataEncryptionProperties;
 import com.sclinic.security.session.SessionTokenAuthFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -35,7 +36,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  */
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(AuthProperties.class)
+@EnableConfigurationProperties({AuthProperties.class, DataEncryptionProperties.class})
 @RequiredArgsConstructor
 public class SecurityConfig {
 

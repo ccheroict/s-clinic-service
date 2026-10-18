@@ -56,6 +56,19 @@ sclinic:
     backup-code-count: ${AUTH_BACKUP_CODE_COUNT:10}
     totp-issuer: ${AUTH_TOTP_ISSUER:S-Clinic}
 
+  crypto:
+    # Keys for encrypting patient identity numbers at rest. No defaults, on
+    # purpose: a default would be published in this repository, which makes the
+    # encryption decorative. The application refuses to start without them.
+    #   openssl rand -base64 32
+    # Losing these keys means losing the identity numbers; back them up somewhere
+    # other than the database they protect.
+    key: ${SCLINIC_DATA_KEY:}
+    # Separate key for the lookup index. The index is a keyed hash of the same
+    # plaintext, so one key for both would mean a single compromise breaks
+    # confidentiality and the index together.
+    index-key: ${SCLINIC_INDEX_KEY:}
+
   bootstrap:
     admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
     # Leave empty to generate a random password, printed to the log once on first
