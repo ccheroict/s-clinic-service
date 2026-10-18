@@ -248,13 +248,27 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Integration test: rút consent nhắc hẹn thì ngừng gửi
     - _Requirements: 11.5, 11.6, 11.7_
 
-  - [ ] 2.7 Danh mục dùng chung
+  - [x] 2.7 Danh mục dùng chung
     - Tạo bảng `catalog_icd10`, `catalog_drug`, `catalog_allergen`, hoàn thiện `service`
     - `catalog_drug` lưu tên INN, biệt dược, hàm lượng, dạng bào chế, đường dùng, đơn vị tính, mã thuốc, phân loại kiểm soát đặc biệt
     - Liên kết `catalog_drug` với `catalog_allergen` để đối chiếu khi kê đơn
     - Cơ chế nhập danh mục từ tệp, báo cáo số bản ghi thêm mới, cập nhật, bỏ qua
     - Tìm kiếm gợi ý theo cả mã và tên
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5_
+    - **Danh mục ship rỗng.** Đây là danh mục quốc gia do Bộ Y tế ban hành; seed sẵn trong migration là đưa mã lâm sàng bịa vào đơn thuốc. Nạp từ tệp qua `CatalogueImportService`
+    - Lý do phải mã hoá thay vì văn bản tự do: "Penicillin", "penicilin" và "PNC" là **một** chất với con người và **ba** chuỗi khác nhau với database — mà lần kiểm tra dị ứng có ý nghĩa là lần nổ trên cả ba
+    - `catalog_drug` tách `inn_name` (tên gốc, thứ mà kiểm tra dị ứng thực sự quan tâm) khỏi `brand_name` (thứ ghi trên vỏ hộp, và là thứ bệnh nhân sẽ nói). Tìm kiếm khớp **cả hai**: người tìm Augmentin gõ Augmentin, người tìm amoxicillin gõ amoxicillin, cả hai phải ra cùng một thuốc
+    - `national_code` tách khỏi `code` của phòng khám vì một thuốc có thể chưa có mã quốc gia, mà đơn thuốc cần mã nào đang có. Unique nhưng **partial**, chỉ khi không null
+    - `control_class` đặt trên **thuốc**, không phó thác cho người kê nhớ: nghĩa vụ bổ sung khi kê thuốc kiểm soát đặc biệt không nên dựa vào việc ai đó nhận ra tên thuốc
+    - `catalog_allergen.parent_id` tự tham chiếu để ghi phân nhóm (dị ứng một penicillin có thể cảnh báo cả nhóm beta-lactam). Tự tham chiếu chứ không bảng riêng vì phân cấp rất nông, và bản thân một nhóm thuốc cũng là thứ bệnh nhân phản ứng với
+    - `catalog_drug_allergen` nhiều-nhiều: một thuốc phối hợp chứa nhiều chất, một chất có trong nhiều thuốc. `findContainingAnyAllergen` chính là câu truy vấn mà kiểm tra dị ứng lúc kê đơn sẽ chạy
+    - `service` bổ sung `unit` và `vat_rate` vì hoá đơn theo NĐ 123/2020 cần cả hai trên từng dòng, và chúng thuộc về dịch vụ chứ không phải gõ lại mỗi lần lập hoá đơn
+    - **Import khớp theo mã và lặp lại được.** Chạy lại cùng một tệp báo toàn bộ là "bỏ qua" và không đổi gì, nên người vận hành không chắc đã chạy chưa thì cứ chạy lại. Hàng có chi tiết khác thì tính vào "cập nhật" — **đây là con số đáng xem**: một lần cập nhật danh mục âm thầm đổi hàm lượng của thuốc đã dùng trong đơn là việc cần biết trước khi nó xảy ra. "Đã nhập 4.000 dòng" trả lời sai câu hỏi
+    - **Một dòng lỗi không làm đổ cả tệp**, chỉ bị từ chối kèm số dòng và lý do. Từ chối cả tệp vì một dấu phẩy lạc nghĩa là danh mục bốn nghìn dòng không bao giờ nạp được
+    - Dòng thuốc tham chiếu chất dị ứng không tồn tại thì **bị từ chối**, không nhập thuốc mà bỏ liên kết — nhập thiếu liên kết sẽ làm kiểm tra dị ứng âm thầm không đầy đủ, tệ hơn là từ chối thẳng
+    - Tự viết tách CSV thay vì thêm thư viện: tệp là danh mục có cấu trúc cố định, và thứ duy nhất cần xử lý ngoài tách dấu phẩy là trường trong ngoặc kép có chứa dấu phẩy — mà hàm lượng thuốc thì có, kiểu `"500mg, 125mg"`
+    - Dòng đầu tiên không rỗng được coi là header **theo vị trí, không theo nội dung**, để một danh mục mà mục đầu tiên tình cờ tên là "code" không bị âm thầm bỏ mất
+    - Mã còn tra được kể cả khi `active = false`, chỉ không hiện trong gợi ý: một đơn thuốc viết năm ngoái tham chiếu thuốc nay đã rút số đăng ký, và nó vẫn phải hiển thị được
 
   - [ ] 2.8 Viết test cho danh mục
     - Import test với tệp mẫu, kiểm tra số liệu báo cáo

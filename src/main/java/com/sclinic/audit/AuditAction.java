@@ -27,5 +27,13 @@ public enum AuditAction {
     BREAK_GLASS,
 
     /** An administrator ended someone's break-glass access early. */
-    BREAK_GLASS_REVOKED
+    BREAK_GLASS_REVOKED,
+
+    /**
+     * A reference catalogue was loaded from file. Recorded because a catalogue
+     * update changes what can be prescribed and how it is coded, and the counts
+     * are what tell a later review whether a given import changed existing
+     * entries or only added new ones.
+     */
+    IMPORT
 }
