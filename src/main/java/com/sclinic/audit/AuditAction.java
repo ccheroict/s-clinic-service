@@ -14,5 +14,18 @@ public enum AuditAction {
      * checks themselves leave a history, and so a run of the check can be tied
      * to the head hash it reported.
      */
-    VERIFY_CHAIN
+    VERIFY_CHAIN,
+
+    /**
+     * A clinician opened a record they had no treating relationship with.
+     *
+     * <p>Its own action rather than a severity flag on the entry: the action is
+     * part of what the audit hash covers, so it cannot be quietly downgraded to
+     * something unremarkable later. A severity column added outside the hash
+     * could be.
+     */
+    BREAK_GLASS,
+
+    /** An administrator ended someone's break-glass access early. */
+    BREAK_GLASS_REVOKED
 }

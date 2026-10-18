@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,6 +54,48 @@ public interface PatientRepository extends JpaRepository<Patient, UUID> {
                     OR p.phone LIKE CONCAT('%', :keyword, '%'))
             """)
     Page<Patient> searchActive(@Param("keyword") String keyword, Pageable pageable);
+
+    /**
+     * The patients one doctor may list: those they have an appointment with, plus
+     * any they currently hold a break-glass grant over.
+     *
+     * <p>Requirement 8.1. Written as one query rather than filtering a full page
+     * afterwards, because post-filtering a paged result returns short pages and a
+     * wrong total — and a patient list that silently drops entries is worse than
+     * one that refuses.
+     */
+    @Query("""
+            SELECT p FROM Patient p
+             WHERE p.deletedAt IS NULL
+               AND (LOWER(p.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                    OR p.phone LIKE CONCAT('%', :keyword, '%'))
+               AND (EXISTS (SELECT 1 FROM Appointment a
+                             WHERE a.patientId = p.id AND a.doctorId = :doctorId)
+                    OR p.id IN :grantedPatientIds)
+            """)
+    Page<Patient> searchActiveForDoctor(@Param("keyword") String keyword,
+                                        @Param("doctorId") UUID doctorId,
+                                        @Param("grantedPatientIds") Collection<UUID> grantedPatientIds,
+                                        Pageable pageable);
+
+    /**
+     * The unfiltered version of {@link #searchActiveForDoctor}.
+     *
+     * <p>A separate method rather than passing a null keyword into that one:
+     * a null parameter has no inferred SQL type, so Hibernate binds it as
+     * {@code bytea} and {@code lower(?)} fails outright. Splitting the two cases
+     * is also what the non-doctor path already does.
+     */
+    @Query("""
+            SELECT p FROM Patient p
+             WHERE p.deletedAt IS NULL
+               AND (EXISTS (SELECT 1 FROM Appointment a
+                             WHERE a.patientId = p.id AND a.doctorId = :doctorId)
+                    OR p.id IN :grantedPatientIds)
+            """)
+    Page<Patient> findActiveForDoctor(@Param("doctorId") UUID doctorId,
+                                      @Param("grantedPatientIds") Collection<UUID> grantedPatientIds,
+                                      Pageable pageable);
 
     /**
      * Records whose retention period has run out and that are not on legal hold.

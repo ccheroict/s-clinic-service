@@ -178,7 +178,7 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Mỗi test dùng một số định danh riêng (`AtomicInteger`): cột định danh có unique index qua blind index — chính là hành vi đang test — nên dùng chung một số trên database dùng chung sẽ làm mọi test sau test đầu tiên đụng nhau
     - Còn thiếu: chưa test **đổi khoá** (key rotation). Định dạng lưu đã có tiền tố `v1:` để làm được việc đó, nhưng chưa có cơ chế đọc bằng khoá cũ rồi ghi lại bằng khoá mới. Cần khi phòng khám có quy trình luân chuyển khoá
 
-  - [ ] 1.14 Phân quyền tối thiểu cần thiết và break-glass
+  - [x] 1.14 Phân quyền tối thiểu cần thiết và break-glass (backend xong, frontend còn nợ)
     - Tạo migration `V11__break_glass.sql`: bảng `break_glass_grant`
     - Tạo `PatientAccessGuard` quyết định theo vai trò và `Care_Relationship` (tồn tại appointment hoặc encounter giữa bác sĩ và bệnh nhân)
     - Tạo `BreakGlassService` và `POST /api/patients/{id}/break-glass` yêu cầu lý do không rỗng, quyền có thời hạn, audit mức cảnh báo, thông báo ADMIN
@@ -186,11 +186,27 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Sửa `PatientService.search` lọc theo `Care_Relationship` khi vai trò là DOCTOR
     - Frontend: hộp thoại nhập lý do break-glass
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7_
+    - **Quan hệ điều trị suy ra từ `appointment`, không tạo bảng riêng.** Bảng riêng là lưu cùng một sự thật hai lần, và bản sao sẽ lệch: một bác sĩ bị chuyển khỏi bệnh nhân vẫn giữ quyền cho tới khi có thứ gì đó nhớ xoá dòng quan hệ đi
+    - **Break-glass dễ làm nhưng không thể làm âm thầm.** Quyền cấp ngay vì tình huống cần tới nó là tình huống cấp bách; giá phải trả là một lý do được nêu, một bản ghi audit riêng loại, và thông báo tới quản trị. Cửa khoá mà không có chìa dẫn tới dùng chung tài khoản đăng nhập — tệ hơn một cửa mở có tên người mở trên đó
+    - Thông báo 403 **nói rõ đường đi qua** và trả kèm `breakGlassPath`. Một cái 403 trơ ở đúng lúc người ta cần hồ sơ sẽ dẫn tới cách lách tệ nhất: vay tài khoản đồng nghiệp
+    - **`BREAK_GLASS` là một `AuditAction` riêng, không phải cột mức độ trên `audit_log`.** Action nằm trong phần được hash của chuỗi audit nên không thể hạ cấp về sau mà chuỗi không đứt; một cột severity thêm ngoài phần hash thì sửa được âm thầm từ "cảnh báo" thành "thường"
+    - **Hết hạn được đánh giá ngay trong câu truy vấn tra quyền**, không bằng job nền. Job nền để lại một khoảng thời gian mà quyền đã hết hạn vẫn mở được hồ sơ
+    - **Hai DTO thật, không phải một DTO với trường để null.** Trường bị null không phân biệt được với trường rỗng, nên caller không biết "bệnh nhân không có dị ứng nào được ghi" khác với "bạn không được phép biết" — trong bối cảnh lâm sàng hai điều đó không được phép lẫn. Một kiểu không có trường đó thì không thể đọc nhầm, và nó cũng khiến một trường lâm sàng thêm vào sau này không tự động xuất hiện ở bản hành chính
+    - **Lọc danh sách trong câu truy vấn, không lọc sau khi phân trang.** Lọc sau phân trang trả về trang ngắn và tổng số sai, mà một danh sách bệnh nhân âm thầm thiếu mục còn tệ hơn một danh sách từ chối thẳng
+    - Không ghi audit cho việc bác sĩ đọc bệnh nhân của chính mình — đó là hệ thống hoạt động đúng, ghi hết sẽ vùi lấp những bản ghi đáng chú ý. ADMIN đọc thì **luôn** ghi (yêu cầu 8.7), và một lần đọc chỉ vào được nhờ break-glass cũng ghi riêng
+    - `NotFound` quyết định **trước** `Forbidden`: trả "không có quyền" cho bệnh nhân không tồn tại sẽ để caller dò ra id nào là thật bằng cách đọc loại lỗi
+    - **KHÁC YÊU CẦU 8.3 — thông báo ADMIN chưa phải thông báo thật.** `BreakGlassNotifier` hiện ghi log mức WARN kèm tên người, tức thứ mà log pipeline báo động được. Nó **không** phải email và không phải thông báo trong ứng dụng: hệ thống chưa có kênh nào cho cả hai, và dựng một kênh ở đây đồng nghĩa chọn nhà cung cấp email như tác dụng phụ của một thay đổi về kiểm soát truy cập. Tách thành type riêng để sau này thêm kênh thật là viết implementation mới chứ không sửa logic phân quyền. Có log mức ERROR riêng cho trường hợp phòng khám **không có ADMIN nào đang hoạt động** — khi đó không ai soát việc dùng break-glass, và tính chịu trách nhiệm mà cơ chế này dựa vào trở thành hình thức
+    - **CÒN NỢ: hộp thoại break-glass ở frontend chưa làm.** Backend đã trả 403 kèm `breakGlassPath`, nhưng frontend hiện chỉ hiện lỗi 403 thường mà chưa mời người dùng nhập lý do
+    - Biết trước và chấp nhận: `PatientAccessGuard.viewFor` mặc định trả `FULL` cho vai trò lạ. Mặc định đúng phải là `ADMINISTRATIVE` để một vai trò thêm vào sau không lộ dữ liệu lâm sàng cho tới khi có người nhớ phân loại nó. Có test ghi lại hành vi hiện tại
 
-  - [ ] 1.15 Viết test cho phân quyền
+  - [x] 1.15 Viết test cho phân quyền
     - Unit test: ma trận quyền theo vai trò, quan hệ điều trị, và có hay không break-glass
     - Integration test: break-glass tạo audit đúng loại, hết hạn thì mất quyền, lý do rỗng bị từ chối
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7_
+    - `PatientAccessGuardTest` (21 test): ma trận vai trò × quan hệ điều trị × có/không grant; bác sĩ có quan hệ điều trị thì **không** cần tra grant; thông báo từ chối có nêu break-glass; grant đã thu hồi và đã hết hạn đều không còn hiệu lực
+    - `BreakGlassIntegrationTest` (28 test, DB `access_it`): ba nhân viên, một bệnh nhân. Bác sĩ điều trị thấy toàn bộ; bác sĩ khác bị 403 kèm đường đi qua; lễ tân vào được nhưng **trường lâm sàng vắng mặt chứ không phải rỗng**, kể cả trong danh sách; lễ tân không xin được break-glass; break-glass mở được hồ sơ, đúng thời hạn cấu hình, lưu lý do, bị từ chối nếu lý do rỗng hoặc quá ngắn, **không** mở bệnh nhân khác, **không** mở cho bác sĩ thứ ba, hết hạn thì mất quyền, bị thu hồi thì mất quyền; audit ghi `BREAK_GLASS` riêng loại và vẫn nằm trong chuỗi hash; ADMIN đọc luôn được ghi, bác sĩ điều trị đọc thường thì không, đọc qua grant thì có; **lý do không bị sao vào `audit_log.detail`**
+    - Hai lỗi test tự bắt được: (1) truyền `null` cho tham số keyword làm Hibernate không suy ra được kiểu nên bind thành `bytea` và `lower(bytea)` không tồn tại — phải tách thành hai phương thức repository thay vì một phương thức nhận keyword rỗng; (2) test lùi `expires_at` về quá khứ đã vi phạm đúng ràng buộc `chk_break_glass_window` mình vừa đặt, phải lùi cả `granted_at`
+    - Lưu ý fixture: bệnh nhân tích luỹ qua các test trên database dùng chung và danh sách có phân trang, nên mỗi bệnh nhân phải có tên đủ riêng để tìm chính xác. Đọc trang đầu rồi mong bệnh nhân mới nhất nằm ở đó sẽ vỡ ngay khi có hơn một trang — chính lỗi này đã xảy ra
 
 - [ ] 2. Giai đoạn 1: Mô hình dữ liệu và sự đồng ý
 

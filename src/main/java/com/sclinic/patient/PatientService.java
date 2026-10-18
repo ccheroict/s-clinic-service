@@ -1,5 +1,7 @@
 package com.sclinic.patient;
 
+import com.sclinic.access.BreakGlassGrantRepository;
+import com.sclinic.access.PatientAccessGuard;
 import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
@@ -24,6 +26,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -49,21 +52,77 @@ public class PatientService {
     private final RetentionCalculator retentionCalculator;
     private final StaffRepository staffRepository;
     private final BlindIndex blindIndex;
+    private final PatientAccessGuard accessGuard;
+    private final BreakGlassGrantRepository breakGlassRepository;
     private final Clock clock;
 
+    /**
+     * Lists patients the caller is entitled to see.
+     *
+     * <p>A doctor gets only the patients they treat, plus any they hold a
+     * break-glass grant over. Receptionists and admins get everyone, though a
+     * receptionist's rows carry no clinical fields.
+     */
     @Transactional(readOnly = true)
-    public Page<PatientResponse> search(String keyword, Pageable pageable) {
-        Page<Patient> page = StringUtils.hasText(keyword)
-                ? repository.searchActive(keyword, pageable)
-                : repository.findByDeletedAtIsNull(pageable);
-        return page.map(mapper::toResponse);
+    public Page<?> search(String keyword, Pageable pageable, UUID staffId, String role) {
+        String term = StringUtils.hasText(keyword) ? keyword : null;
+
+        Page<Patient> page;
+        if (accessGuard.isDoctor(role)) {
+            Collection<UUID> granted = grantedPatientIds(staffId);
+            page = term != null
+                    ? repository.searchActiveForDoctor(term, staffId, granted, pageable)
+                    : repository.findActiveForDoctor(staffId, granted, pageable);
+        } else if (term != null) {
+            page = repository.searchActive(term, pageable);
+        } else {
+            page = repository.findByDeletedAtIsNull(pageable);
+        }
+
+        return accessGuard.viewFor(role) == PatientAccessGuard.View.ADMINISTRATIVE
+                ? page.map(mapper::toAdministrativeResponse)
+                : page.map(mapper::toResponse);
     }
 
+    /**
+     * @throws com.sclinic.access.PatientAccessDeniedException if a doctor has no
+     *         treating relationship with this patient and no live grant
+     */
     @Transactional(readOnly = true)
-    public PatientResponse getById(UUID id) {
+    public Object getById(UUID id, UUID staffId, String role) {
         Patient patient = find(id);
-        auditService.record(AuditAction.VIEW, ENTITY_TYPE, id);
-        return mapper.toResponse(patient);
+        accessGuard.requireAccess(id, staffId, role);
+
+        // A doctor reading their own patient is the system working, and recording
+        // every such read would bury the entries that matter. An admin reading a
+        // patient record is rarely clinically necessary, so requirement 8.7 asks
+        // for those specifically.
+        if (accessGuard.alwaysAudit(role) || hasBreakGlassOnly(id, staffId, role)) {
+            auditService.record(AuditAction.VIEW, ENTITY_TYPE, id);
+        }
+
+        return accessGuard.viewFor(role) == PatientAccessGuard.View.ADMINISTRATIVE
+                ? mapper.toAdministrativeResponse(patient)
+                : mapper.toResponse(patient);
+    }
+
+    /** A read reached only through a grant is worth recording on its own. */
+    private boolean hasBreakGlassOnly(UUID patientId, UUID staffId, String role) {
+        return accessGuard.isDoctor(role)
+                && !accessGuard.hasTreatingRelationship(patientId, staffId);
+    }
+
+    /**
+     * Patients the doctor holds a live grant over.
+     *
+     * <p>Never empty: an empty collection in an SQL {@code IN} list is a portability
+     * hazard, and getting it wrong here means a doctor silently sees no patients
+     * at all. The nil UUID can never be a patient id, so it is an inert filler.
+     */
+    private Collection<UUID> grantedPatientIds(UUID staffId) {
+        List<UUID> granted = breakGlassRepository
+                .findPatientIdsWithActiveGrant(staffId, clock.instant());
+        return granted.isEmpty() ? List.of(new UUID(0, 0)) : granted;
     }
 
     @Transactional

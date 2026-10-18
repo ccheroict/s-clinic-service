@@ -1,5 +1,6 @@
 package com.sclinic.patient;
 
+import com.sclinic.patient.dto.PatientAdministrativeResponse;
 import com.sclinic.patient.dto.PatientRequest;
 import com.sclinic.patient.dto.PatientResponse;
 import org.mapstruct.BeanMapping;
@@ -12,6 +13,13 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 public interface PatientMapper {
 
     PatientResponse toResponse(Patient patient);
+
+    /**
+     * The receptionist's view: no clinical fields. See
+     * {@link com.sclinic.patient.dto.PatientAdministrativeResponse} for why this
+     * is a separate type rather than the full response with fields blanked.
+     */
+    PatientAdministrativeResponse toAdministrativeResponse(Patient patient);
 
     Patient toEntity(PatientRequest request);
 

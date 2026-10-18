@@ -56,6 +56,11 @@ sclinic:
     backup-code-count: ${AUTH_BACKUP_CODE_COUNT:10}
     totp-issuer: ${AUTH_TOTP_ISSUER:S-Clinic}
 
+  access:
+    # How long break-glass access to one patient lasts. Long enough to finish
+    # treating them, short enough that it does not become a standing permission.
+    break-glass-duration: ${ACCESS_BREAK_GLASS_DURATION:PT8H}
+
   crypto:
     # Keys for encrypting patient identity numbers at rest. No defaults, on
     # purpose: a default would be published in this repository, which makes the

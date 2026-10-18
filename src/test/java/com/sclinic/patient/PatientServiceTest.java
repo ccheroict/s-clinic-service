@@ -2,6 +2,8 @@ package com.sclinic.patient;
 
 import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditService;
+import com.sclinic.access.BreakGlassGrantRepository;
+import com.sclinic.access.PatientAccessGuard;
 import com.sclinic.common.exception.NotFoundException;
 import com.sclinic.crypto.BlindIndex;
 import com.sclinic.patient.dto.PatientDeleteRequest;
@@ -39,6 +41,8 @@ class PatientServiceTest {
     private RetentionCalculator retentionCalculator;
     private StaffRepository staffRepository;
     private BlindIndex blindIndex;
+    private PatientAccessGuard accessGuard;
+    private BreakGlassGrantRepository breakGlassRepository;
     private PatientService service;
 
     @BeforeEach
@@ -48,6 +52,12 @@ class PatientServiceTest {
         retentionCalculator = Mockito.mock(RetentionCalculator.class);
         staffRepository = Mockito.mock(StaffRepository.class);
         blindIndex = Mockito.mock(BlindIndex.class);
+        accessGuard = Mockito.mock(PatientAccessGuard.class);
+        breakGlassRepository = Mockito.mock(BreakGlassGrantRepository.class);
+
+        // This class covers the record lifecycle; the access matrix has its own
+        // test class, so here the guard is permissive and reports the full view.
+        when(accessGuard.viewFor(any())).thenReturn(PatientAccessGuard.View.FULL);
 
         service = new PatientService(
                 repository,
@@ -56,6 +66,8 @@ class PatientServiceTest {
                 retentionCalculator,
                 staffRepository,
                 blindIndex,
+                accessGuard,
+                breakGlassRepository,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -99,8 +111,23 @@ class PatientServiceTest {
         UUID id = UUID.randomUUID();
         when(repository.findByIdAndDeletedAtIsNull(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getById(id))
+        assertThatThrownBy(() -> service.getById(id, UUID.randomUUID(), "ADMIN"))
                 .isInstanceOf(NotFoundException.class);
+    }
+
+    /**
+     * Not found is decided before access is. Answering "forbidden" for a patient
+     * that does not exist would let a caller map which patient ids are real by
+     * reading which error comes back.
+     */
+    @Test
+    void getById_doesNotRevealWhetherAnInaccessiblePatientExists() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByIdAndDeletedAtIsNull(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getById(id, UUID.randomUUID(), "DOCTOR"))
+                .isInstanceOf(NotFoundException.class);
+        verify(accessGuard, never()).requireAccess(any(), any(), any());
     }
 
     @Nested

@@ -4,6 +4,7 @@ import com.sclinic.appointment.exception.BusinessHoursException;
 import com.sclinic.appointment.exception.ConflictException;
 import com.sclinic.appointment.exception.InvalidStatusTransitionException;
 import com.sclinic.appointment.exception.NotEditableException;
+import com.sclinic.access.PatientAccessDeniedException;
 import com.sclinic.security.AuthenticationFailedException;
 import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
 import com.sclinic.security.mfa.MfaFailedException;
@@ -40,6 +41,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(WeakPasswordException.class)
     public ProblemDetail handleWeakPassword(WeakPasswordException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /**
+     * A clinician asked for a patient they have no treating relationship with.
+     *
+     * <p>The message names break-glass as the way through on purpose. A bare 403
+     * at the moment someone needs a record invites the worst workaround available,
+     * which is borrowing a colleague's login; telling them the door has a key, and
+     * that using it leaves their name on it, keeps the access attributable.
+     */
+    @ExceptionHandler(PatientAccessDeniedException.class)
+    public ProblemDetail handlePatientAccessDenied(PatientAccessDeniedException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setProperty("breakGlassPath", "/api/patients/" + ex.getPatientId() + "/break-glass");
+        return problem;
     }
 
     /** A second-factor challenge was refused. */

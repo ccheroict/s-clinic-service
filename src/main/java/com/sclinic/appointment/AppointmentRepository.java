@@ -13,6 +13,16 @@ import java.util.UUID;
 public interface AppointmentRepository extends JpaRepository<Appointment, UUID> {
 
     /**
+     * Whether this doctor treats this patient.
+     *
+     * <p>The treating relationship behind the access rule is derived from here
+     * rather than kept in a table of its own: that would be the same fact stored
+     * twice, and the copy would drift — a doctor reassigned away from a patient
+     * would keep access until something remembered to delete the row.
+     */
+    boolean existsByPatientIdAndDoctorId(UUID patientId, UUID doctorId);
+
+    /**
      * Tìm lịch hẹn xung đột cho bác sĩ.
      * Overlap condition: existing.start < new.end AND new.start < existing.end
      * existing.end = existing.scheduled_at + existing.duration_min * interval '1 minute'
