@@ -5,6 +5,7 @@ import com.sclinic.appointment.exception.ConflictException;
 import com.sclinic.appointment.exception.InvalidStatusTransitionException;
 import com.sclinic.appointment.exception.NotEditableException;
 import com.sclinic.access.PatientAccessDeniedException;
+import com.sclinic.allergy.DuplicateAllergyException;
 import com.sclinic.security.AuthenticationFailedException;
 import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
 import com.sclinic.security.mfa.MfaFailedException;
@@ -57,6 +58,18 @@ public class GlobalExceptionHandler {
                 ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
         problem.setProperty("breakGlassPath", "/api/patients/" + ex.getPatientId() + "/break-glass");
         return problem;
+    }
+
+    /**
+     * A live allergy record already names this substance.
+     *
+     * <p>A conflict rather than a validation failure: the request was
+     * well-formed, the record simply already exists. Refused rather than merged
+     * because a duplicate is how a severity gets silently downgraded.
+     */
+    @ExceptionHandler(DuplicateAllergyException.class)
+    public ProblemDetail handleDuplicateAllergy(DuplicateAllergyException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** A second-factor challenge was refused. */

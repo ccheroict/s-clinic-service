@@ -121,6 +121,24 @@ public class Patient {
     @Column(name = "deceased_on")
     private LocalDate deceasedOn;
 
+    // ---------- Allergy review (V13) ----------
+
+    /**
+     * Set for every patient whose free-text allergies were carried across by V13,
+     * and cleared only by a clinician saying they have read them.
+     *
+     * <p>The migration deliberately did not parse those sentences into coded
+     * allergens: a parser would get most rows right and the rows it got wrong
+     * would be invisible. This flag is the system being honest that it does not
+     * yet know what the sentence meant.
+     */
+    @Column(name = "allergy_review_required", nullable = false)
+    private boolean allergyReviewRequired = false;
+
+    /** The original free-text allergies, kept verbatim for whoever reviews them. */
+    @Column(name = "allergy_legacy_note")
+    private String allergyLegacyNote;
+
     public boolean isDeleted() {
         return deletedAt != null;
     }

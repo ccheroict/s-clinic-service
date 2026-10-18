@@ -129,6 +129,7 @@ public class PatientService {
     public PatientResponse create(PatientRequest request) {
         Patient patient = mapper.toEntity(request);
         patient.setNationalIdHash(blindIndex.of(patient.getNationalId()));
+        flagFreeTextAllergiesForReview(patient);
         // flush so DB-/Hibernate-generated values (timestamps) are populated in the response
         Patient saved = repository.saveAndFlush(patient);
 
@@ -148,6 +149,7 @@ public class PatientService {
 
         mapper.updateEntity(request, patient);
         rejectFutureDateOfDeath(patient.getDeceasedOn());
+        flagFreeTextAllergiesForReview(patient);
 
         // The encrypted column cannot be searched, so the lookup index has to be
         // rewritten whenever the number behind it changes.
@@ -223,6 +225,29 @@ public class PatientService {
         retentionCalculator
                 .retentionUntil(ENTITY_TYPE, createdOn, withdrawnOn, patient.getDeceasedOn())
                 .ifPresent(patient::setRetentionUntil);
+    }
+
+    /**
+     * Free-text allergies, however they arrive, mean a clinician still has to
+     * turn them into coded records.
+     *
+     * <p>V13 moved the existing sentences into {@code allergyLegacyNote} and
+     * flagged those patients for review. The free-text field it migrated from is
+     * still writable, so without this a sentence typed in today would land in
+     * exactly the state the migration exists to flag — unstructured, invisible
+     * to the prescribing check — and carry no mark saying so. The flag is set on
+     * the way in for the same reason the migration set it: the system cannot act
+     * on prose, and should say as much rather than look complete.
+     *
+     * <p>Only ever set here, never cleared: clearing it is a clinician asserting
+     * they have read the text, which is {@code PatientAllergyService.markReviewed}.
+     */
+    private void flagFreeTextAllergiesForReview(Patient patient) {
+        String allergies = patient.getAllergies();
+
+        if (allergies != null && !allergies.isBlank()) {
+            patient.setAllergyReviewRequired(true);
+        }
     }
 
     private void rejectFutureDateOfDeath(LocalDate deceasedOn) {

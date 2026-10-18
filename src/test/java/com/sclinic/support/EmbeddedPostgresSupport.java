@@ -38,7 +38,18 @@ public final class EmbeddedPostgresSupport {
     private static synchronized EmbeddedPostgres instance() {
         if (instance == null) {
             try {
-                instance = EmbeddedPostgres.builder().start();
+                instance = EmbeddedPostgres.builder()
+                        // One instance serves the whole JVM, and every Spring
+                        // test context the suite caches keeps its own connection
+                        // pool open against it for the duration of the run. The
+                        // server's default ceiling is reached by about a dozen
+                        // contexts, and the failure it produces — "sorry, too
+                        // many clients already" while creating a database —
+                        // points at whichever test class happened to start last
+                        // rather than at the number of them, so it reads as a
+                        // broken test instead of an exhausted server.
+                        .setServerConfig("max_connections", "300")
+                        .start();
             } catch (IOException e) {
                 throw new UncheckedIOException("Could not start embedded PostgreSQL", e);
             }

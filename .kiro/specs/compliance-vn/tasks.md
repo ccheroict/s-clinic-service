@@ -223,17 +223,31 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Unit test: validate địa chỉ theo danh mục, trẻ dưới 72 tháng buộc có tên bố hoặc mẹ
     - **Validates: Requirements 9.3, 9.4, 9.1**
 
-  - [ ] 2.3 Dị ứng có cấu trúc
+  - [x] 2.3 Dị ứng có cấu trúc
     - Tạo bảng `patient_allergy` tham chiếu `catalog_allergen`, lưu biểu hiện, mức độ, ngày ghi nhận, người ghi nhận, trạng thái
     - Partial unique index chặn hai bản ghi còn hiệu lực trỏ cùng một chất trên cùng bệnh nhân
     - Di trú `allergies` văn bản tự do sang ghi chú và đánh dấu cần rà soát, không tự động suy diễn
     - Frontend: cảnh báo nổi bật khi có dị ứng mức độ nặng
     - _Requirements: 10.1, 10.2, 10.3, 10.4_
+    - **Khác thiết kế ban đầu:**
+      - Thêm cột `certainty` (SUSPECTED/REPORTED/CONFIRMED) ngoài `severity`. Hai thứ độc lập: "nghi sốc phản vệ" và "mẩn đỏ đã xác nhận" là hai tình huống khác nhau, một trường "mức độ nghiêm trọng" không diễn đạt được cái nào
+      - Bỏ hiệu lực (retire) bắt buộc có lý do, cả tầng ứng dụng và CHECK constraint. Gỡ một dị ứng khỏi danh sách còn hiệu lực là thay đổi những gì được kê cho bệnh nhân
+      - Thứ tự sắp xếp theo mức độ viết bằng CASE tường minh, không dùng `order by severity desc`. Enum lưu dạng chuỗi nên sắp xếp chuỗi cho ra đúng SEVERE/MODERATE/MILD chỉ vì trùng hợp thứ tự chữ cái đảo ngược — thêm một mức (CRITICAL) sẽ âm thầm xếp nó dưới MILD
+      - Cột `allergies` cũ CỐ TÌNH giữ lại (như V9 với cột định danh): bỏ ngay trong cùng bản phát hành với lúc di chuyển dữ liệu thì mất luôn cách kiểm tra việc di chuyển có đúng không
+      - **Đóng thêm một lỗ hổng không có trong spec:** cột `allergies` vẫn ghi được qua API, nên văn bản tự do nhập MỚI sẽ nằm đúng trạng thái mà bản di trú tồn tại để đánh dấu, mà lại không mang dấu nào. `PatientService` giờ bật `allergyReviewRequired` cho mọi lần ghi văn bản tự do, không chỉ lúc di trú
+      - Controller khoá ở mức class `hasAnyRole('DOCTOR','ADMIN')`. `PatientAccessGuard.requireAccess` thoát sớm với mọi vai trò ngoài DOCTOR (việc chặn dữ liệu lâm sàng là của `viewFor`), nên chỉ dựa vào guard thì lễ tân đọc được dị ứng — test đã bắt đúng lỗi này
+      - Lượt đọc của ADMIN được ghi nhật ký (yêu cầu 8.7), lượt đọc của bác sĩ điều trị thì không
 
-  - [ ] 2.4 Viết test cho dị ứng
+  - [x] 2.4 Viết test cho dị ứng
     - Unit test: không cho trùng chất còn hiệu lực trên cùng bệnh nhân
     - Migration test: dữ liệu `allergies` cũ không bị mất và được đánh dấu cần rà soát
     - _Requirements: 10.2, 10.3_
+    - **Đã làm:** 37 test backend (`PatientAllergyIntegrationTest`, DB `allergy_it`) + 13 test frontend (`allergyWarning.test.ts`). Backend 474 → 511, frontend 356 → 371
+    - **Ghi chú:**
+      - Test migration ĐỌC chính câu `update` từ tệp V13 rồi chạy nó, chứ không viết lại câu lệnh trong test. Flyway chạy V13 trên schema rỗng nên không quan sát được tác dụng trên dữ liệu thật; lấy câu lệnh từ tệp mới làm cho nó là test của migration — sửa câu lệnh là test đỏ
+      - Có test chốt rằng KHÔNG có bản ghi dị ứng có mã nào được sinh ra từ văn bản tự do
+      - Có test chốt ràng buộc chống trùng vẫn giữ khi BỎ QUA tầng service (insert trực tiếp bằng SQL): import, script sửa dữ liệu, hay hai instance chạy song song đều phải đụng cùng bức tường
+      - **Sửa hạ tầng test:** suite vượt giới hạn kết nối của embedded Postgres khi thêm class thứ 12 (`FATAL: sorry, too many clients already`). Mỗi Spring test context cache lại giữ một pool riêng suốt lượt chạy. Đã nâng `max_connections` lên 300 và chặn pool ở 16/context. KHÔNG hạ xuống 8: một request giữ nhiều hơn một kết nối cùng lúc (transaction đăng nhập mở trong khi ghi audit lấy kết nối riêng), và `AccountLockoutIntegrationTest` chạy 8 luồng song song
 
   - [ ] 2.5 Module quản lý sự đồng ý
     - Tạo bảng `consent_type`, `consent_type_version`, `consent_record`
