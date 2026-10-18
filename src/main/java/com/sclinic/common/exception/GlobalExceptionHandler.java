@@ -6,6 +6,8 @@ import com.sclinic.appointment.exception.InvalidStatusTransitionException;
 import com.sclinic.appointment.exception.NotEditableException;
 import com.sclinic.access.PatientAccessDeniedException;
 import com.sclinic.allergy.DuplicateAllergyException;
+import com.sclinic.consent.ConsentNotConfiguredException;
+import com.sclinic.consent.ConsentRequiredException;
 import com.sclinic.security.AuthenticationFailedException;
 import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
 import com.sclinic.security.mfa.MfaFailedException;
@@ -58,6 +60,38 @@ public class GlobalExceptionHandler {
                 ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
         problem.setProperty("breakGlassPath", "/api/patients/" + ex.getPatientId() + "/break-glass");
         return problem;
+    }
+
+    /**
+     * An action needing consent was attempted without a live one.
+     *
+     * <p>Requirement 11.5: the refusal names the missing type. Forbidden rather
+     * than a validation failure — the request was well-formed and the caller is
+     * authenticated; what is missing is the patient's permission.
+     */
+    @ExceptionHandler(ConsentRequiredException.class)
+    public ProblemDetail handleConsentRequired(ConsentRequiredException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+
+        // Machine-readable as well as readable, so a client can take the user
+        // straight to the form for the missing consent instead of making them
+        // find it.
+        problem.setProperty("missingConsent", ex.getMissing().name());
+        return problem;
+    }
+
+    /**
+     * A consent type has no published wording.
+     *
+     * <p>503 rather than 403, because nothing the patient or the clinician does
+     * will fix it: an administrator has to publish the wording. Returning 403
+     * here would send the clinic to ask patients to sign something that cannot
+     * be recorded.
+     */
+    @ExceptionHandler(ConsentNotConfiguredException.class)
+    public ProblemDetail handleConsentNotConfigured(ConsentNotConfiguredException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     /**

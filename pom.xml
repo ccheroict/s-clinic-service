@@ -19,6 +19,24 @@
 
     <properties>
         <java.version>17</java.version>
+
+        <!--
+            Source files are UTF-8, and until this was set javac read them in the
+            build machine's default charset. On Windows that is windows-1252, so
+            every Vietnamese string literal in the codebase was being compiled
+            into mojibake — including the messages shown to clinic staff when an
+            action is refused. The source files themselves were always fine; what
+            was broken was the reading of them, which is why this was invisible
+            until a test compared a Vietnamese literal against the same text
+            after a round trip through the database.
+
+            Set explicitly rather than left to the environment: a build whose
+            output depends on the locale of the machine that ran it produces
+            different artifacts from the same commit.
+        -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <embedded.postgres.version>2.0.7</embedded.postgres.version>
         <embedded.postgres.binaries.version>16.2.0</embedded.postgres.binaries.version>

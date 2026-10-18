@@ -249,18 +249,37 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
       - Có test chốt ràng buộc chống trùng vẫn giữ khi BỎ QUA tầng service (insert trực tiếp bằng SQL): import, script sửa dữ liệu, hay hai instance chạy song song đều phải đụng cùng bức tường
       - **Sửa hạ tầng test:** suite vượt giới hạn kết nối của embedded Postgres khi thêm class thứ 12 (`FATAL: sorry, too many clients already`). Mỗi Spring test context cache lại giữ một pool riêng suốt lượt chạy. Đã nâng `max_connections` lên 300 và chặn pool ở 16/context. KHÔNG hạ xuống 8: một request giữ nhiều hơn một kết nối cùng lúc (transaction đăng nhập mở trong khi ghi audit lấy kết nối riêng), và `AccountLockoutIntegrationTest` chạy 8 luồng song song
 
-  - [ ] 2.5 Module quản lý sự đồng ý
+  - [x] 2.5 Module quản lý sự đồng ý
     - Tạo bảng `consent_type`, `consent_type_version`, `consent_record`
     - Tạo 7 loại consent tối thiểu, nội dung có phiên bản. Nội dung về dữ liệu nhạy cảm phải nêu rõ tính nhạy cảm
     - Tạo `ConsentService` với `requireConsent(patientId, type)` để các module khác gọi
     - Rút đồng ý ghi thời điểm, các hành động phụ thuộc bị từ chối từ đó trở đi
     - Frontend: màn hình thu consent khi tiếp nhận bệnh nhân mới
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7_
+    - **Khác thiết kế ban đầu:**
+      - **Seed 7 LOẠI nhưng KHÔNG seed NỘI DUNG.** Danh sách loại do yêu cầu 11.1 ấn định nên seed là an toàn (thiếu một loại thì hành động phụ thuộc hoặc chặn tất cả, hoặc tệ hơn là lọt vì không có gì để kiểm). Nội dung thì không: đó là văn bản pháp lý phòng khám phải chịu trách nhiệm, ship văn bản pháp lý do máy sinh ra nghĩa là sẽ có phòng khám chạy thật và đã thu đồng ý theo lời lẽ không ai ở đó phê duyệt. Giống `retention_policy`: hệ thống chưa cấu hình phải trông như chưa cấu hình
+      - **`ConsentNotConfiguredException` TÁCH RIÊNG khỏi `ConsentRequiredException`.** Nhìn từ ngoài hai cái giống nhau (hành động đều bị từ chối) nhưng là hai vấn đề trái ngược: một cái sửa bằng việc bệnh nhân ký, cái kia bằng việc quản trị viên công bố nội dung chưa ai soạn. Báo cái thứ hai thành cái thứ nhất sẽ khiến phòng khám đi xin chữ ký cho thứ sẽ tiếp tục thất bại
+      - **Yêu cầu 11.4 ÉP BẰNG TRIGGER, không chỉ bằng service.** Đây là ràng buộc liên bảng (nghĩa vụ ở `consent_type`, văn bản ở `consent_type_version`) nên CHECK không diễn đạt được. Phải khai báo được vì bản ghi version còn đến từ migration và từ script quản trị viên chạy tay — mà chạy tay chính là trường hợp bỏ qua kiểm tra ở tầng service. Trigger `raise ... using errcode = '23514'` để mọi client thấy nó là vi phạm ràng buộc, không phải lỗi server lạ
+      - **`consent_type_id` được SAO xuống `consent_record` dù version đã hàm ý nó**, vì câu hỏi chạy trước mọi hành động là "bệnh nhân này có đồng ý loại này còn hiệu lực không" và trả lời bằng join là join trên đường nóng nhất. Bản sao không lệch được: **khoá ngoại tổ hợp** `(version_id, consent_type_id)` trỏ vào `unique (id, type_id)` của bảng version. Đây là cách khai báo thuần, không cần trigger
+      - **`purpose` ĐÓNG BĂNG lúc thu đồng ý**, không đọc xuyên join. Sửa nội dung sau này không được phép làm thay đổi hồi tố điều bệnh nhân đã đồng ý — chính là lý do phải đánh phiên bản nội dung
+      - **Thêm trạng thái `superseded_at` ngoài `withdrawn_at`.** Đồng ý lại theo nội dung mới KHÔNG phải là rút đồng ý; ghi thành rút sẽ đặt vào vết kiểm toán một sự kiện chưa từng xảy ra. Partial unique index chỉ cho MỘT bản ghi còn hiệu lực mỗi (bệnh nhân, loại) — hai bản ghi còn hiệu lực làm câu "bản nào đang áp dụng" không có đáp án, phá bỏ toàn bộ ý nghĩa của việc đánh phiên bản
+      - **Rút đồng ý KHÔNG bắt buộc lý do** (khác với bỏ hiệu lực dị ứng, nơi lý do là bắt buộc). Quyền rút là vô điều kiện theo NĐ 13/2023; bắt khai lý do là hệ thống đòi bệnh nhân biện minh cho việc thực thi quyền. Nhưng *ai ghi nhận* thì bắt buộc
+      - **Mọi vai trò đều được thu và ghi nhận rút đồng ý.** Thu đồng ý là việc của lễ tân, và rút phải ghi được bởi bất cứ ai bệnh nhân gặp. Từ chối vì sai vai trò không làm bệnh nhân quay lại sau — nó làm việc rút không được ghi lại. Công bố nội dung thì CHỈ ADMIN: quyết định hỏi bệnh nhân điều gì là việc khác, rủi ro khác, với việc ghi lại họ đã trả lời gì
+      - `blocks_care` là DỮ LIỆU trên `consent_type`, không phải luật trong code. Từ chối cho dùng ảnh quảng cáo không bao giờ được ảnh hưởng việc được điều trị, và điều kiện viết trong code là điều kiện sẽ mọc ngoại lệ về sau
+      - Version có `effective_from` tương lai thì CHƯA được phục vụ: dàn sẵn một thay đổi không được bắt đầu thu đồng ý theo nội dung chưa áp dụng
+      - Chưa có bộ phận gửi nhắc hẹn nào tồn tại. Yêu cầu 11.7 hiện thực hoá thành `ConsentService.mayReceiveReminders(patientId)` — đặt tên theo điều nó quyết định, để thứ phải dừng khi rút đồng ý là MỘT hàm tìm được. Bộ phận gửi sau này phải hỏi nó TỪNG LẦN GỬI, không dựng danh sách người nhận một lần
 
-  - [ ] 2.6 Viết test cho consent
+  - [x] 2.6 Viết test cho consent
     - Unit test: consent đã rút thì hết hiệu lực, hành động thiếu consent bị từ chối kèm tên loại còn thiếu
     - Integration test: rút consent nhắc hẹn thì ngừng gửi
     - _Requirements: 11.5, 11.6, 11.7_
+    - **Đã làm:** 47 test backend (`ConsentIntegrationTest`, DB `consent_it`) + 22 test frontend (`consentRules.test.ts`). Backend 511 → 558, frontend 371 → 393
+    - **LỖI SẢN PHẨM THẬT TEST BẮT ĐƯỢC — mã hoá nguồn:** `pom.xml` chưa đặt `project.build.sourceEncoding`, nên javac đọc tệp nguồn bằng mã hoá mặc định của máy build (windows-1252 trên Windows). **Mọi chuỗi tiếng Việt trong code Java đang bị biến thành mojibake, kể cả thông báo hiện cho nhân viên phòng khám khi một hành động bị từ chối.** Tệp nguồn luôn đúng; thứ sai là việc đọc chúng — nên lỗi này vô hình cho đến khi có test so sánh một chuỗi tiếng Việt với chính nó sau vòng đi qua database. Đã đặt UTF-8 tường minh: build mà kết quả phụ thuộc locale của máy chạy nó thì cùng một commit cho ra artifact khác nhau
+    - **Ghi chú khác:**
+      - Spring Data KHÔNG quét repository lồng trong class (`considerNestedRepositories` mặc định false). Gộp ba repository vào một tệp `ConsentRepositories` compile được nhưng không tạo bean — phải tách thành ba interface top-level
+      - `getContentAsString()` của MockMvc mặc định ISO-8859-1 khi response không khai báo charset, mà Spring không gắn charset vào `application/json` (JSON mặc nhiên là UTF-8). Client HTTP thật đọc đúng, MockMvc đọc sai — phải `getContentAsString(StandardCharsets.UTF_8)`
+      - **KHÔNG làm yếu bất biến "mọi 5xx không lộ chi tiết" ở frontend.** Đã thử carve-out cho 503 để thông báo "chưa công bố nội dung" đến được người dùng, nhưng test property hiện có chốt bất biến này, và nó đúng: hàm đó không phân biệt được ProblemDetail do ứng dụng viết với 503 do proxy/container sinh ra, loại thứ hai mang nội tạng hệ thống. Thay vào đó màn hình lấy cùng thông tin từ chỗ an toàn hơn — endpoint trạng thái báo `notConfigured` theo từng loại — và mutation thu đồng ý làm mới trạng thái CẢ KHI LỖI
+      - Có test chốt ràng buộc giữ được khi BỎ QUA service (insert SQL trực tiếp) cho cả ba thứ: trigger 11.4, khoá ngoại tổ hợp loại/version, và chống hai bản ghi còn hiệu lực
 
   - [x] 2.7 Danh mục dùng chung
     - Tạo bảng `catalog_icd10`, `catalog_drug`, `catalog_allergen`, hoàn thiện `service`
