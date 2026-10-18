@@ -107,6 +107,71 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - `ChangePasswordPage.vue` giờ có kiểm tra cổng lúc mount như hai màn hình interim còn lại. Trước đó vào trực tiếp thì form vẫn hiện rồi trả "mật khẩu hiện tại không đúng", tức là một cách nói rất khó hiểu cho "bạn chưa đăng nhập"
 
   - [ ] 1.9c NỢ KỸ THUẬT từ lượt rà soát — cần quyết định hoặc làm ở giai đoạn sau
+
+    - ### ĐIỂM DỪNG 18/10/2026 — đã phân loại 15 mục, chưa viết dòng code nào
+      Đã đọc xong code liên quan và chốt cách làm cho từng mục. Hôm sau bắt đầu
+      trực tiếp từ Lô A, không cần đọc lại.
+
+      **Lô A — ba lỗ hổng thật, làm trước, gộp một migration `V15`:**
+      1. *Dùng lại mã TOTP.* Thêm cột `totp_last_step bigint` cho `staff`.
+         `TotpGenerator.verify` hiện trả `boolean` nên không biết bước nào khớp —
+         cần thêm biến thể trả về bước đã khớp (`long`, -1 nếu không khớp),
+         GIỮ NGUYÊN vòng lặp quét hết cửa sổ để thời gian chạy không tiết lộ
+         bước nào khớp. `MfaService.verifyChallenge` + `confirmEnrolment` từ chối
+         khi `step <= totp_last_step`. Phải cập nhật cột bằng UPDATE có điều kiện
+         (`where totp_last_step < :step`) chứ không set rồi save: hai request
+         cùng mã, cùng lúc, nếu set vô điều kiện thì cả hai đều lọt — đúng kiểu
+         lỗi mà `backupCodeRepository.spend` đã xử lý đúng
+      2. *Chuỗi audit không có khoá.* Chuyển `AuditHash` từ SHA-256 trần sang
+         HMAC-SHA256, khoá `sclinic.audit.chain-key` (base64, ngoài PostgreSQL),
+         KHÔNG mặc định — thiếu khoá là không khởi động, như `sclinic.crypto.key`.
+         `AuditHash` đang là utility tĩnh nên phải thành bean (`AuditService` và
+         `AuditChainVerifier` đều dùng); `AuditHashTest` sẽ phải sửa theo.
+         Tái dùng `CryptoKeys.decode` (hiện package-private, cần mở public) để
+         không nhân bản logic "không có mặc định, từ chối khởi động".
+         GHI RÕ GIỚI HẠN: việc này chặn người chỉ có quyền ghi database, KHÔNG
+         chặn người có cả database và biến môi trường của app. Mốc neo ngoài máy
+         (công bố `head_hash` ra nơi chỉ ghi thêm) vẫn còn mở, thuộc hạ tầng
+      3. *`X-Forwarded-For` tin vô điều kiện.* KHÔNG cần chờ user chốt kiến trúc
+         nữa: đổi mặc định thành KHÔNG tin header (dùng `getRemoteAddr`), thêm
+         `sclinic.security.trusted-proxy-count` (mặc định 0). Khi >0 thì lấy
+         entry đếm từ PHẢI sang (các entry bên phải do proxy của chính mình ghi
+         nên tin được; bên trái là client tự khai). Thêm chặn độ dài. Mặc định an
+         toàn, cấu hình là cách opt-in — nên không còn chặn bởi câu hỏi nào
+
+      **Lô B — lỗ hổng audit có sẵn:** `PatientService.search` và
+      `AppointmentService.list` không ghi `VIEW`, nên liệt kê cả danh sách bệnh
+      nhân thì không để lại dấu, mở một bệnh nhân thì có. Cân nhắc: ghi mỗi lần
+      search sẽ đẩy lưu lượng lên một dòng `audit_chain_head` duy nhất (xem mục
+      hiệu năng), nên ghi kèm `detail` là số kết quả + có hay không từ khoá,
+      KHÔNG ghi bản thân từ khoá (từ khoá là tên bệnh nhân)
+
+      **Lô C — nhất quán xác thực:** cấp lại mã dự phòng (service đã có, chưa
+      expose); cho phiên FULL chưa có yếu tố thứ hai tự bật MFA (giữ nguyên
+      quyết định 409 khi ĐÃ có yếu tố đã xác nhận); phân biệt interim token hết
+      hạn với mã sai ở `/mfa-verify`; đổi mật khẩu phải đếm vào lockout; thống
+      nhất thông báo lỗi xác thực; tách exception cho lỗi client thật để
+      `IllegalArgumentException` nội bộ không thành 400 kèm nguyên message
+
+      **Lô D — dọn dẹp:** job xoá `session_token` hết hạn (`deleteExpiredBefore`
+      đã có, chưa ai gọi), `auth_event`, `staff_password_history`
+
+      **Đã đóng bằng phân tích, không cần code:**
+      - *Index V7 không `CONCURRENTLY`*: chỉ gây khoá nếu V7 chạy trên bảng đã có
+        dữ liệu. V7 đã chạy ở mọi môi trường hiện có khi `audit_log` còn rỗng, và
+        cài mới thì cũng chạy trên bảng rỗng. Dựng lại bằng `CONCURRENTLY` lúc
+        này không đổi gì. Mục này moot
+      - *Hiệu năng (audit mỗi lượt đọc xếp hàng trên một dòng; `touch` ghi mỗi
+        request)*: giữ nguyên quyết định ban đầu — chỉ xử lý khi đo thấy thành
+        vấn đề. Lô B làm tăng tải lên dòng này nên ĐO khi làm Lô B
+
+      **Vẫn chặn bởi user:**
+      - *`V3` sửa tại chỗ*: cần user xác nhận không môi trường nào có dòng V3
+        trong `flyway_schema_history`. Nếu có thì phải chuyển bản sửa index sang
+        migration mới
+      - *Tách DB role cho ứng dụng* (để `REVOKE UPDATE, DELETE ON audit_log` có
+        hiệu lực): tầng hạ tầng, cần quyết định triển khai
+
     - **Mã TOTP dùng lại được trong cửa sổ ±1 bước (~90 giây).** RFC 6238 khuyến nghị từ chối mã đã dùng. Cần thêm cột `totp_last_step` cho `staff` và so sánh. NÊN LÀM, gộp vào migration của Task 1.12
     - **Chuỗi hash không có khoá và không có mốc neo ngoài database.** SHA-256 trần trên các trường ai đọc bảng cũng thấy, còn `audit_chain_head` thì nằm cùng database. Ai ghi được cả hai đều có thể viết lại lịch sử rồi tính lại chuỗi cho khớp. Nó phát hiện được sự bất cẩn, không phát hiện được ý đồ. Muốn thành **chứng cứ** thì cần HMAC với khoá nằm ngoài PostgreSQL, hoặc định kỳ công bố `head_hash` ra một nơi chỉ ghi thêm ở ngoài máy. Task 1.12 sẽ dựng kho khoá, nên làm cùng lúc
     - **`X-Forwarded-For` được tin vô điều kiện** và không chặn độ dài, mà giá trị đó lại được băm vào chuỗi audit như dữ kiện xác thực. Nghĩa là IP trong trail do client tự khai. CẦN USER QUYẾT ĐỊNH: chốt kiến trúc reverse proxy rồi dùng `server.forward-headers-strategy` cùng danh sách proxy tin cậy, thay vì tự đọc header
