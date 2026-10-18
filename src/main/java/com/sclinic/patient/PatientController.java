@@ -1,5 +1,6 @@
 package com.sclinic.patient;
 
+import com.sclinic.patient.dto.PatientDeleteRequest;
 import com.sclinic.patient.dto.PatientRequest;
 import com.sclinic.patient.dto.PatientResponse;
 import jakarta.validation.Valid;
@@ -52,11 +53,19 @@ public class PatientController {
         return service.update(id, request);
     }
 
-    /** Deleting patient records is restricted to admins. */
+    /**
+     * Withdraws a patient record from use. Admin only, and a reason is required.
+     *
+     * <p>This does not delete anything. A clinic must keep medical records for a
+     * statutory minimum period, so the record is marked withdrawn and disappears
+     * from the business API while the row and its history remain. There is no
+     * endpoint anywhere that removes a patient record permanently.
+     */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        service.delete(id);
+    public ResponseEntity<Void> delete(@PathVariable UUID id,
+                                       @Valid @RequestBody PatientDeleteRequest request) {
+        service.delete(id, request);
         return ResponseEntity.noContent().build();
     }
 }

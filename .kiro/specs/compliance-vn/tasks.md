@@ -123,18 +123,30 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - **`PatientService.search` và `AppointmentService.list` không ghi audit VIEW**, nên liệt kê cả danh sách bệnh nhân thì không để lại dấu vết, còn mở một bệnh nhân thì có. Là lỗ hổng có sẵn, nhưng thuộc đúng chủ đề audit
     - **Tách DB role cho ứng dụng** (xem 1.8) để `REVOKE UPDATE, DELETE ON audit_log` có hiệu lực, làm ở tầng hạ tầng
 
-  - [ ] 1.10 Xóa mềm và metadata lưu trữ
+  - [x] 1.10 Xóa mềm và metadata lưu trữ
     - DỪNG trước khi hardcode: hỏi chủ phòng khám thời hạn lưu trữ theo Luật KCB 15/2023 `[CẦN KIỂM CHỨNG]`
     - Tạo migration `V8__soft_delete_retention.sql`: bổ sung `deleted_at`, `deleted_by`, `delete_reason`, `retention_until`, `legal_hold` cho `patient` và các bảng thuộc diện lưu trữ; tạo bảng `retention_policy` cấu hình thời hạn theo loại bản ghi
     - Bỏ hard delete khỏi `PatientService.delete`, chuyển sang đánh dấu xóa kèm lý do bắt buộc
     - Dùng phương thức repository tường minh (`findByIdAndDeletedAtIsNull`) thay vì lọc ẩn
     - Tính `retention_until` theo `RetentionPolicy`, tính lại khi bệnh nhân được đánh dấu đã mất
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
+    - **Làm được mà không cần chờ câu trả lời về thời hạn.** Yêu cầu 6.4 nói con số phải được xác nhận trước khi hiện thực hóa, nhưng thiết kế đã định sẵn `retention_policy` là một **bảng** — tức con số là dữ liệu cấu hình, không phải code. Nên toàn bộ cơ chế dựng được ngay, còn con số thì phòng khám điền sau cùng với căn cứ pháp lý. Bảng để **trống có chủ ý**, không seed giá trị nào
+    - **Hướng fail an toàn:** chưa có chính sách thì không tính được `retention_until`, nên nó để null; mà null thì không bao giờ thoả điều kiện "đã quá hạn", nên **hệ thống chưa cấu hình sẽ giữ lại mọi thứ**. Một con số đoán bừa còn tệ hơn không có số, vì nó trông như có căn cứ mà lại âm thầm quyết định khi nào hồ sơ bệnh án được phép tiêu hủy
+    - **Phân chia trách nhiệm:** *mốc* bắt đầu tính là quyết định thiết kế nên nằm trong code (`RetentionCalculator`) — ưu tiên ngày mất nếu chính sách có quy định riêng, rồi tới ngày ngừng sử dụng, cuối cùng là ngày tạo; còn *số năm* là câu hỏi pháp lý nên nằm trong dữ liệu. Cột `legal_basis` là `not null`: một thời hạn lưu trữ không truy được về văn bản nào thì không thể kiểm toán
+    - `delete_reason` và `deleted_by` được **database** ràng buộc bằng `CHECK`, không chỉ validate ở DTO. Một lần ngừng sử dụng hồ sơ mà không ghi lý do thì không thể soát lại, nên không phó thác cho việc mọi caller tương lai đều nhớ
+    - Ràng buộc "ngày mất không ở tương lai" **không** làm bằng `CHECK` trong database: so sánh với `current_date` là hàm không IMMUTABLE, nên một bản dump phục hồi sau nhiều năm có thể fail validation đúng những dòng vốn hợp lệ lúc ghi — mà hồ sơ bệnh án thì phải sống lâu hơn vài thế hệ của chính hệ thống này. Kiểm tra đó đặt ở tầng ứng dụng. Đây đúng loại bẫy đã làm `V3` không áp dụng được
+    - Lọc bản ghi đã ngừng sử dụng bằng **tên phương thức tường minh**, không dùng Hibernate filter toàn cục. Filter ẩn làm mọi câu truy vấn trông như không bị lọc, và trường hợp cần thấy bản ghi đã xoá (quản lý lưu trữ, hoặc tra tên bệnh nhân của một lịch hẹn cũ) sẽ âm thầm trả về rỗng — lỗi đó trông giống mất dữ liệu chứ không giống truy vấn bị lọc
+    - Đổi `Instant` sang ngày theo **múi giờ phòng khám**, không theo UTC. Một hồ sơ ngừng dùng lúc 23h ngày 31 là ngừng ngày 31 theo giờ địa phương; tính từ ngày 1 vì UTC đã sang ngày mới thì lệch một ngày, mà lệch về phía tiêu hủy sớm hơn
+    - Audit chỉ ghi rằng đã có một lần ngừng sử dụng, **không** sao lý do vào `audit_log.detail`. Lý do nằm trên chính dòng bệnh nhân; sao sang chỗ thứ hai là tạo thêm một bản copy của một câu kể về hoàn cảnh người bệnh, ở nơi có mức bảo vệ khác và sống lâu hơn cả hồ sơ nó mô tả
+    - Frontend: `apiClient.delete` nhận thêm body (lý do **không** đi qua query string vì query string vào access log, mà lý do có thể kể hoàn cảnh bệnh nhân). `ConfirmDeleteDialog` thêm ô lý do bắt buộc, và sửa lại phần chữ — nó đang nói "thao tác này không thể hoàn tác", tức nói sai sự thật về đúng điều quan trọng nhất: hồ sơ không bị xoá
 
-  - [ ] 1.11 Viết test cho xóa mềm
+  - [x] 1.11 Viết test cho xóa mềm
     - Unit test: tính `retention_until` theo từng loại bản ghi và theo trường hợp tử vong
     - Integration test: bản ghi đã xóa không xuất hiện trong list và search, không còn endpoint nào xóa vĩnh viễn
     - _Requirements: 6.1, 6.3, 6.4, 6.6_
+    - `RetentionCalculatorTest` (13 test): mốc tính theo từng trường hợp, quy tắc tử vong thắng quy tắc ngừng dùng, chưa cấu hình thì không ra ngày nào, không áp chính sách của loại bản ghi này sang loại khác, và ngày 29/2 cộng số năm thì lùi về 28/2 chứ không nhảy sang tháng 3 — đáng ghim vì lệch một ngày ở đây là lệch một ngày của thời điểm hồ sơ bệnh án được phép tiêu hủy
+    - `SoftDeleteIntegrationTest` (23 test, DB `softdelete_it`, **không** `@Transactional`): dòng vẫn còn sau khi xoá; database từ chối xoá khi thiếu lý do, lý do chỉ có khoảng trắng, hoặc thiếu người xoá; bản ghi biến khỏi list, tìm theo tên, tìm theo điện thoại, `GET` và `PUT` theo id; không xoá được hai lần; RECEPTIONIST bị 403; chưa cấu hình chính sách thì không có gì đủ điều kiện tiêu hủy; `legal_hold` giữ lại bản ghi đã quá hạn (yêu cầu 6.5); bản ghi còn đang dùng thì dù quá hạn cũng không đủ điều kiện; và bệnh nhân đã ngừng dùng vẫn tra được qua `findById` để các bản ghi tham chiếu tới họ còn hiển thị được tên
+    - Còn thiếu: chưa có test cho `legal_hold` **qua API** vì chưa có endpoint bật/tắt cờ này — nó thuộc task 7.3 (bộ máy lưu trữ và tiêu hủy). Hiện cờ chỉ đặt được trực tiếp trong database
 
   - [ ] 1.12 Mã hóa cột định danh và sao lưu (RỦI RO CAO)
     - Sao lưu dữ liệu trước khi chạy

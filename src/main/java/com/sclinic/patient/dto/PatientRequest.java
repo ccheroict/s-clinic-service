@@ -26,6 +26,12 @@ public record PatientRequest(
         String note,
         String nationalId,
         String insuranceNo,
-        String taxCode
+        String taxCode,
+
+        /**
+         * Date of death. Setting it starts the retention clock that applies to
+         * deceased patients, where the configured policy defines a separate one.
+         */
+        LocalDate deceasedOn
 ) {
 }

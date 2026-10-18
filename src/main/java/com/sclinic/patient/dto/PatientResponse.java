@@ -22,6 +22,18 @@ public record PatientResponse(
         String insuranceNo,
         String taxCode,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+
+        LocalDate deceasedOn,
+
+        /**
+         * Earliest date this record may be considered for destruction, or null
+         * when no retention policy is configured for patient records. Null means
+         * "keep": a record with no retention date never becomes eligible.
+         */
+        LocalDate retentionUntil,
+
+        /** Blocks destruction regardless of the retention date. */
+        boolean legalHold
 ) {
 }
