@@ -257,7 +257,30 @@ public class AppointmentService {
         // 3. Query with filters and pagination
         Page<Appointment> page = appointmentRepository.findWithFilters(from, to, doctorId, status, pageable);
 
-        // 4. Map each Appointment to AppointmentResponse (resolve patient/doctor names)
+        // 4. Record the read when it reached beyond the caller's own patients.
+        //
+        // An appointment list is a list of who is attending a dermatology clinic
+        // and when, which is health data about every person on it whether or not
+        // a clinical field is attached. Opening one appointment left a trail and
+        // paging the whole schedule left none.
+        //
+        // Not recorded for a doctor looking at their own schedule: the filter
+        // above has already narrowed it to their own patients, and an entry per
+        // routine clinical read buries the entries that matter. The filters are
+        // recorded as flags rather than values, because the date and doctor id
+        // say which patients were listed, and that belongs in the rows the read
+        // returned rather than copied into the trail.
+        if (!"DOCTOR".equals(currentRole)) {
+            auditService.record(AuditAction.VIEW, ENTITY_TYPE, null,
+                    AuditDetail.builder()
+                            .code("scope", "list")
+                            .code("results", String.valueOf(page.getNumberOfElements()))
+                            .code("byDate", date == null ? "false" : "true")
+                            .code("byDoctor", doctorId == null ? "false" : "true")
+                            .build());
+        }
+
+        // 5. Map each Appointment to AppointmentResponse (resolve patient/doctor names)
         return page.map(appointment -> {
             String patientName = patientRepository.findById(appointment.getPatientId())
                     .map(Patient::getFullName)

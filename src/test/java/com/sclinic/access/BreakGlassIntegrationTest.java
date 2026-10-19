@@ -208,6 +208,123 @@ class BreakGlassIntegrationTest {
     // ---------- requirement 8.1, 8.2 ----------
 
     @Nested
+    class BulkReadsAreRecorded {
+
+        private long listEntries(String entityType, String token, String query) throws Exception {
+            long before = listAuditCount(entityType);
+
+            mockMvc.perform(get(query)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(status().isOk());
+
+            return listAuditCount(entityType) - before;
+        }
+
+        private long listAuditCount(String entityType) {
+            return jdbcTemplate.queryForObject("""
+                    select count(*) from audit_log
+                    where entity_type = ? and action = 'VIEW' and entity_id is null
+                      and detail ->> 'scope' = 'list'
+                    """, Long.class, entityType);
+        }
+
+        @Test
+        void aReceptionistListingEveryPatientIsRecorded() throws Exception {
+            // A receptionist sees no clinical fields, but they do see the name,
+            // phone and address of every patient in the clinic, which is personal
+            // data under NĐ 13/2023 whether or not a diagnosis is attached.
+            assertThat(listEntries("patient", receptionistToken, "/api/patients")).isEqualTo(1);
+        }
+
+        @Test
+        void anAdminListingEveryPatientIsRecorded() throws Exception {
+            assertThat(listEntries("patient", adminToken, "/api/patients")).isEqualTo(1);
+        }
+
+        @Test
+        void aDoctorListingTheirOwnPatientsIsNotRecorded() throws Exception {
+            // Already narrowed to the patients they treat, so it carries no more
+            // than opening each of them would — and opening one of their own
+            // patients is deliberately not recorded either, because an entry per
+            // routine clinical read buries the entries that matter.
+            assertThat(listEntries("patient", treatingDoctorToken, "/api/patients")).isZero();
+        }
+
+        @Test
+        void theEntryIsNotTiedToOnePatientBecauseTheReadWasNot() throws Exception {
+            listEntries("patient", adminToken, "/api/patients");
+
+            Map<String, Object> entry = jdbcTemplate.queryForMap("""
+                    select entity_id, detail::text as detail from audit_log
+                    where entity_type = 'patient' and action = 'VIEW' and entity_id is null
+                    order by created_at desc limit 1
+                    """);
+
+            // Naming one patient would be a claim about the read that is not
+            // true; the page covered many.
+            assertThat(entry.get("entity_id")).isNull();
+            assertThat(entry.get("detail").toString()).contains("results");
+        }
+
+        @Test
+        void theSearchKeywordIsNotWrittenToTheTrail() throws Exception {
+            mockMvc.perform(get("/api/patients")
+                            .queryParam("q", patientName)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isOk());
+
+            Map<String, Object> entry = jdbcTemplate.queryForMap("""
+                    select detail::text as detail from audit_log
+                    where entity_type = 'patient' and action = 'VIEW' and entity_id is null
+                    order by created_at desc limit 1
+                    """);
+
+            // People search by patient name, so the term is usually somebody's
+            // name. Storing it would copy identifying data into a table with
+            // different retention and weaker access rules than the record it came
+            // from — the same reason a delete reason is not copied into detail.
+            assertThat(entry.get("detail").toString()).doesNotContain(patientName);
+            // That the read was narrowed is still recorded: paging the whole list
+            // reads differently from looking one person up.
+            assertThat(entry.get("detail").toString()).contains("filtered");
+            assertThat(entry.get("detail").toString()).contains("true");
+        }
+
+        /*
+         * The equivalent tests for GET /api/appointments are not here yet, and
+         * deliberately so.
+         *
+         * AppointmentService.list does write the audit entry, and the code for it
+         * is in this commit. The endpoint itself cannot be driven from a test:
+         * AppointmentRepository.findWithFilters is built from
+         * (? is null or column = ?) clauses, and PostgreSQL will not infer a type
+         * for a bare parameter compared against null, so the query is a SQL
+         * grammar error whenever any filter is left out — with or without a date.
+         *
+         * That is a pre-existing fault these tests uncovered rather than caused,
+         * and it is larger than this batch: the endpoint is effectively unusable
+         * unless a client supplies every filter. Opening it properly, with a test
+         * that pins the unfiltered case, is its own item in task 1.9c rather than
+         * something to bolt onto an audit change.
+         */
+
+        @Test
+        void theListEntryJoinsTheHashChainLikeAnyOther() throws Exception {
+            listEntries("patient", adminToken, "/api/patients");
+
+            Map<String, Object> entry = jdbcTemplate.queryForMap("""
+                    select entry_hash from audit_log
+                    where entity_type = 'patient' and action = 'VIEW' and entity_id is null
+                    order by created_at desc limit 1
+                    """);
+
+            // An audit entry outside the chain is an audit entry that can be
+            // deleted without trace, which would make recording the read pointless.
+            assertThat(entry.get("entry_hash")).isNotNull();
+        }
+    }
+
+    @Nested
     class TreatingRelationship {
 
         @Test

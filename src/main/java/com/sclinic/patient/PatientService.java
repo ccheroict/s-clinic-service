@@ -79,9 +79,48 @@ public class PatientService {
             page = repository.findByDeletedAtIsNull(pageable);
         }
 
+        auditBulkRead(page, term, role);
+
         return accessGuard.viewFor(role) == PatientAccessGuard.View.ADMINISTRATIVE
                 ? page.map(mapper::toAdministrativeResponse)
                 : page.map(mapper::toResponse);
+    }
+
+    /**
+     * Records a list read that reached beyond the caller's own patients.
+     *
+     * <p>Closes a gap the review of task 1.9c found: opening one patient left a
+     * trail and paging through every patient left none, which is the wrong way
+     * round. Reading a thousand records one page at a time is the shape bulk
+     * extraction actually takes, and it was the quietest thing the system could
+     * do.
+     *
+     * <p>Not recorded for doctors. Their list is already narrowed to the patients
+     * they treat, so it carries no more than {@code getById} would on each of
+     * them — and {@code getById} deliberately does not record a doctor reading
+     * their own patient, because an entry per routine clinical read buries the
+     * entries that matter. Receptionists and admins see every patient in the
+     * clinic, which is the access worth being able to review afterwards.
+     *
+     * <p>The keyword is <b>not</b> stored. People search by patient name, so the
+     * search term is usually the name of a patient — writing it to the trail
+     * would copy identifying data into a table with different retention and
+     * weaker access rules than the record it came from, which is the same
+     * reasoning that keeps delete reasons out of {@code audit_log.detail}.
+     * Whether a search was narrowed is recorded, because an unfiltered page
+     * through the whole list reads differently from looking someone up.
+     */
+    private void auditBulkRead(Page<Patient> page, String term, String role) {
+        if (accessGuard.isDoctor(role)) {
+            return;
+        }
+
+        auditService.record(AuditAction.VIEW, ENTITY_TYPE, null,
+                AuditDetail.builder()
+                        .code("scope", "list")
+                        .code("results", String.valueOf(page.getNumberOfElements()))
+                        .code("filtered", term == null ? "false" : "true")
+                        .build());
     }
 
     /**

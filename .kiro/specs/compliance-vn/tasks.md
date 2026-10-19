@@ -142,6 +142,10 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
          nên tin được; bên trái là client tự khai). Thêm chặn độ dài. Mặc định an
          toàn, cấu hình là cách opt-in — nên không còn chặn bởi câu hỏi nào
 
+      **✅ LÔ B ĐÃ XONG 19/10/2026** (phần bệnh nhân). Backend 594 → 600 test
+      xanh. Phần lịch hẹn: code đã có, test chưa viết được vì endpoint vỡ sẵn —
+      xem mục mới "GET /api/appointments vỡ khi thiếu bộ lọc" ở dưới.
+
       **Lô B — lỗ hổng audit có sẵn:** `PatientService.search` và
       `AppointmentService.list` không ghi `VIEW`, nên liệt kê cả danh sách bệnh
       nhân thì không để lại dấu, mở một bệnh nhân thì có. Cân nhắc: ghi mỗi lần
@@ -249,6 +253,53 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
       method mới (vô nghĩa với một câu update) và method cũ MẤT LOCK — tức bộ đếm
       lần đăng nhập sai quay lại thành read-modify-write mà
       `AccountLockoutIntegrationTest` dựng ra để chặn. Đã viết lại cả tệp.
+
+    - ### KẾT QUẢ LÔ B — 19/10/2026
+      Backend 594 → 600 test xanh. 6 test mới trong
+      `BreakGlassIntegrationTest$BulkReadsAreRecorded` (DB `access_it`).
+
+      `PatientService.search` và `AppointmentService.list` giờ ghi `VIEW` với
+      `entity_id = null` (một lượt liệt kê không phải một thực thể; gán một bệnh
+      nhân vào đó là nói sai về lượt đọc).
+
+      - **Ghi cho lễ tân và admin, KHÔNG ghi cho bác sĩ.** Danh sách của bác sĩ đã
+        bị lọc về đúng bệnh nhân họ điều trị nên không mang nhiều hơn việc mở
+        từng người — mà mở bệnh nhân của chính mình thì `getById` cũng cố tình
+        không ghi, vì một dòng cho mỗi lượt đọc lâm sàng thường ngày sẽ chôn mất
+        những dòng đáng xem. Lễ tân và admin thấy MỌI bệnh nhân của phòng khám,
+        đó mới là quyền truy cập cần soát lại được về sau
+      - **KHÔNG ghi từ khoá tìm kiếm.** Người ta tìm theo tên bệnh nhân, nên từ
+        khoá thường chính là tên một người; ghi nó là sao dữ liệu định danh vào
+        một bảng có thời hạn lưu và mức bảo vệ khác với bản ghi nó đến từ — cùng
+        lập luận đã giữ lý do xoá ra khỏi `audit_log.detail`. Chỉ ghi CÓ lọc hay
+        KHÔNG: phân trang qua cả danh sách đọc khác với tra một người
+      - `detail` ghi `scope=list`, `results=<số dòng trang này>`, `filtered`.
+        Với lịch hẹn thêm `byDate`, `byDoctor` — cũng là cờ, không phải giá trị,
+        vì ngày và id bác sĩ nói ra những bệnh nhân nào đã bị liệt kê
+      - Có test chốt dòng audit của lượt liệt kê VẪN NẰM TRONG chuỗi hash: một
+        dòng audit ngoài chuỗi là dòng xoá được không để lại vết, mà như vậy thì
+        ghi lại lượt đọc thành vô nghĩa
+      - **Nợ lại:** chưa ĐO tải thêm lên dòng `audit_chain_head` duy nhất như ghi
+        chú ở mục hiệu năng đã hẹn. Danh sách bệnh nhân là trang hay mở nhất, nên
+        đây là việc cần làm trước khi lên production
+
+    - [ ] **MỚI PHÁT HIỆN 19/10/2026 — `GET /api/appointments` vỡ khi thiếu bộ lọc**
+      `AppointmentRepository.findWithFilters` viết bằng các vế
+      `(? is null or column = ?)`. PostgreSQL KHÔNG suy ra được kiểu cho một tham
+      số trần đem so với null, nên câu truy vấn là `SQLGrammarException` mỗi khi
+      một bộ lọc để trống — kể cả khi đã truyền `date`. Thực tế endpoint chỉ chạy
+      khi client truyền ĐỦ mọi bộ lọc.
+      - Phát hiện khi viết test Lô B cho lịch hẹn, KHÔNG phải do Lô B gây ra
+      - Lọt được tới giờ vì test hiện có đều gọi service trực tiếp hoặc truyền đủ
+        bộ lọc. Không có test nào gọi endpoint ở trạng thái mặc định
+      - Hướng sửa: `cast(:param as uuid)` / `cast(:param as text)` trong JPQL
+        native, hoặc chuyển sang Specification / query động. ĐỒNG THỜI viết test
+        chốt đúng trường hợp không bộ lọc — đó là trường hợp mà client mặc định sẽ
+        gọi
+      - Code ghi audit cho `AppointmentService.list` ĐÃ CÓ và đúng; chỉ còn thiếu
+        hai test (`aReceptionistListingTheScheduleIsRecorded`,
+        `aDoctorListingTheirOwnScheduleIsNotRecorded`) nằm chờ trong comment ở
+        `BreakGlassIntegrationTest$BulkReadsAreRecorded`
 
     - **Mã TOTP dùng lại được trong cửa sổ ±1 bước (~90 giây).** RFC 6238 khuyến nghị từ chối mã đã dùng. Cần thêm cột `totp_last_step` cho `staff` và so sánh. NÊN LÀM, gộp vào migration của Task 1.12
     - **Chuỗi hash không có khoá và không có mốc neo ngoài database.** SHA-256 trần trên các trường ai đọc bảng cũng thấy, còn `audit_chain_head` thì nằm cùng database. Ai ghi được cả hai đều có thể viết lại lịch sử rồi tính lại chuỗi cho khớp. Nó phát hiện được sự bất cẩn, không phát hiện được ý đồ. Muốn thành **chứng cứ** thì cần HMAC với khoá nằm ngoài PostgreSQL, hoặc định kỳ công bố `head_hash` ra một nơi chỉ ghi thêm ở ngoài máy. Task 1.12 sẽ dựng kho khoá, nên làm cùng lúc
