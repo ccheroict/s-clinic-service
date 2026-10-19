@@ -28,15 +28,20 @@ import java.util.Objects;
  * truncated tail shows up as a walk that ends somewhere other than where the head
  * row says it should.
  *
- * <p><b>What this does not prove.</b> The digest is an unkeyed SHA-256 over
- * fields that are all readable from the table, and the only reference point
- * outside {@code audit_log} is {@code audit_chain_head}, in the same database.
- * Anyone who can write to both can rewrite history and recompute a chain and head
- * that agree. This detects tampering by anything short of that — application bugs,
- * a careless migration, SQL injection, an operator editing a row — which is the
- * realistic case. Turning it into evidence against a determined administrator
- * needs a key the database does not hold, or the head hash published somewhere
- * append-only off the box.
+ * <p><b>What this proves, and what it does not.</b> Each link is an HMAC-SHA256
+ * keyed with {@code sclinic.audit.chain-key}, which lives in the application's
+ * environment and not in PostgreSQL. Recomputing a consistent chain therefore
+ * requires the key as well as write access, so database access alone — a stolen
+ * backup, SQL injection, a DBA, a careless migration — can no longer produce a
+ * trail that verifies. Until the review of task 1.9c this was an unkeyed SHA-256
+ * over fields all readable from the table, with the expected head in another row
+ * of the same database, and anyone able to write both could rewrite history and
+ * recompute a chain that agreed with itself.
+ *
+ * <p>What remains outside its reach is whoever holds the database <em>and</em>
+ * this process's environment, since they have both the rows and the key. Closing
+ * that needs the head hash published periodically to an append-only store off the
+ * box; {@link ChainVerification#headHash()} is what such a job would publish.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,6 +52,7 @@ public class AuditChainVerifier {
 
     private final AuditLogRepository auditLogRepository;
     private final AuditChainHeadRepository chainHeadRepository;
+    private final AuditHash auditHash;
 
     /**
      * Verification is read-only and does not block writers, so entries can be
@@ -105,7 +111,7 @@ public class AuditChainVerifier {
                     "entry does not follow the previous one; an entry was removed or inserted");
         }
 
-        String recomputed = AuditHash.of(expectedPrevHash, entry);
+        String recomputed = auditHash.of(expectedPrevHash, entry);
         if (!recomputed.equals(entry.getEntryHash())) {
             return ChainVerification.broken(checked, unchained, entry.getId(),
                     "entry contents do not match its recorded hash; the entry was altered");

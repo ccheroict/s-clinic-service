@@ -112,6 +112,9 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
       Đã đọc xong code liên quan và chốt cách làm cho từng mục. Hôm sau bắt đầu
       trực tiếp từ Lô A, không cần đọc lại.
 
+      **✅ LÔ A ĐÃ XONG 19/10/2026.** Backend 558 → 594 test xanh. Chi tiết và
+      những chỗ làm khác dự tính ghi ở cuối mục 1.9c này.
+
       **Lô A — ba lỗ hổng thật, làm trước, gộp một migration `V15`:**
       1. *Dùng lại mã TOTP.* Thêm cột `totp_last_step bigint` cho `staff`.
          `TotpGenerator.verify` hiện trả `boolean` nên không biết bước nào khớp —
@@ -171,6 +174,81 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
         migration mới
       - *Tách DB role cho ứng dụng* (để `REVOKE UPDATE, DELETE ON audit_log` có
         hiệu lực): tầng hạ tầng, cần quyết định triển khai
+
+    - ### KẾT QUẢ LÔ A — 19/10/2026
+      Backend 558 → 594 test xanh (+36). `V15__totp_replay.sql`.
+
+      **1. Chống dùng lại mã TOTP.** `TotpGenerator.matchingStep` trả về BƯỚC đã
+      khớp thay vì boolean (`verify` thành wrapper mỏng, giữ lại cho 6 test vector
+      RFC 6238 đọc dễ hơn). Vẫn quét hết cửa sổ sau khi khớp để thời gian chạy
+      không tiết lộ bước nào khớp. Cột `staff.totp_last_step` + `advanceTotpStep`
+      cập nhật CÓ ĐIỀU KIỆN (`where totp_last_step is null or totp_last_step <
+      :step`) — chính điều kiện đó mới thật sự ép dùng một lần, còn phép so sánh
+      trong service chỉ tiết kiệm một query ở trường hợp thường. Hai request cùng
+      mã cùng lúc đều qua được phép so sánh, đúng một request lấy được dòng.
+      - Dùng MỘT CỘT chứ không bảng mã đã dùng: bước chỉ tiến về trước nên một số
+        trả lời đủ câu hỏi duy nhất được hỏi; mà một bảng các lần xác thực còn
+        phải dọn, không dọn thì nó thành bản ghi ngày càng dài về chính xác giờ
+        từng nhân viên có mặt ở phòng khám
+      - `confirmEnrolment` DÙNG CHUNG cơ chế này, nên mã vừa dùng để xác nhận
+        đăng ký không đăng nhập lại được. Không chung thì 90 giây đầu sau khi
+        đăng ký vẫn có một mã dùng lại được
+      - `beginEnrolment` và `reset` XOÁ `totp_last_step`: bí mật mới sinh ra mã
+        không liên quan, giữ mốc cũ chỉ để từ chối mã hợp lệ đầu tiên của yếu tố
+        mới khi việc đăng ký rơi vào bước sớm hơn lần đăng nhập cuối
+      - Mã dùng lại báo y hệt mã sai. "Mã này đã dùng rồi" là nói cho người đang
+        giữ mã lấy được rằng họ có đúng mã và chỉ đến muộn
+      - **GIÁ PHẢI TRẢ, đã chấp nhận:** đăng nhập hai lần trong cùng 30 giây thì
+        phải chờ mã kế tiếp. Bình thường với TOTP, và rẻ so với một mã còn dùng
+        được 90 giây sau khi bất kỳ ai nhìn thấy nó
+
+      **2. Chuỗi audit chuyển sang HMAC-SHA256**, khoá `sclinic.audit.chain-key`
+      nằm ngoài PostgreSQL, không mặc định, thiếu là không khởi động.
+      `AuditHash` từ utility tĩnh thành bean (`@Autowired` TƯỜNG MINH trên
+      constructor nhận properties, vì constructor `byte[]` dành cho test cũng là
+      ứng viên và hai constructor không đánh dấu thì Spring đi tìm constructor
+      rỗng). Constructor SAO CHÉP mảng khoá: người gọi tự xoá buffer khoá của
+      mình — việc đúng nên làm — sẽ âm thầm đổi mọi hash ghi sau đó và chuỗi vỡ
+      mà không dòng nào bị sửa.
+      - Đổi được là vì CHƯA deploy production. Sau đó thì chỉ còn hai đường, cả
+        hai đều tệ: ghi lại toàn bộ hash đã lưu (đúng cái năng lực mà chuỗi tồn
+        tại để phủ nhận), hoặc giữ cả hai thuật toán kèm cờ ghi entry nào dùng
+        cái nào (đưa cho kẻ tấn công quyền chọn)
+      - `CryptoKeys.decode` mở `public` + thêm tham số `purpose`, tái dùng thay
+        vì nhân bản logic "không có mặc định, từ chối khởi động". Hai bản sao sẽ
+        lệch, và bản lệch sẽ là bản âm thầm mọc fallback
+      - **GIỚI HẠN còn lại, ghi rõ trong javadoc của `AuditChainVerifier`:** chặn
+        được người CHỈ có quyền ghi database (backup bị lấy, SQL injection, DBA,
+        migration cẩu thả). KHÔNG chặn được người có cả database VÀ biến môi
+        trường của process. Để đóng nốt cần công bố `head_hash` định kỳ ra nơi
+        chỉ ghi thêm ngoài máy — `ChainVerification.headHash()` chính là thứ job
+        đó sẽ công bố
+
+      **3. `X-Forwarded-For` không còn được tin vô điều kiện.** Mặc định
+      `sclinic.network.trusted-proxy-count = 0` → bỏ qua header, dùng
+      `getRemoteAddr`. Với N > 0 thì lấy entry thứ N TỪ PHẢI sang. Thêm chặn độ
+      dài 64 ký tự cho IP (header do kẻ tấn công điều khiển, giá trị lại được ghi
+      vào mọi dòng audit mà request đó chạm tới — không chặn thì một request ghi
+      một megabyte mỗi dòng).
+      - `RequestContext.from(HttpServletRequest)` tĩnh bị **XOÁ**, thay bằng bean
+        `RequestContextResolver`. Giữ lại một đường tiện mà không an toàn bên
+        cạnh đường an toàn thì bảo đảm đường không an toàn sẽ được dùng
+      - KHÔNG còn chặn bởi câu hỏi kiến trúc nào: mặc định an toàn, cấu hình là
+        cách opt-in. Khi chốt xong kiến trúc proxy thì chỉ cần đặt một con số
+
+      **HAI TEST CHỐT HÀNH VI CŨ, đã sửa:**
+      - `AuditTrailIntegrationTest` khẳng định IP ghi nhận là `203.0.113.7` lấy
+        từ header. Giờ khẳng định là địa chỉ peer, kèm giải thích; trường hợp có
+        proxy do `RequestContextResolverTest` phủ
+      - Test phát hiện sửa dòng audit đổi `ip` thành `'127.0.0.1'` — mà đó giờ
+        chính là giá trị mọi dòng đang có, nên "sửa" thành không sửa gì và test
+        PASS VÌ LÝ DO SAI. Đổi sang `'198.51.100.254'`
+
+      **LỖI TÔI TỰ GÂY RA RỒI SỬA:** phần thêm `advanceTotpStep` rơi vào giữa
+      khai báo `findByIdForUpdate`, khiến `@Lock(PESSIMISTIC_WRITE)` chuyển sang
+      method mới (vô nghĩa với một câu update) và method cũ MẤT LOCK — tức bộ đếm
+      lần đăng nhập sai quay lại thành read-modify-write mà
+      `AccountLockoutIntegrationTest` dựng ra để chặn. Đã viết lại cả tệp.
 
     - **Mã TOTP dùng lại được trong cửa sổ ±1 bước (~90 giây).** RFC 6238 khuyến nghị từ chối mã đã dùng. Cần thêm cột `totp_last_step` cho `staff` và so sánh. NÊN LÀM, gộp vào migration của Task 1.12
     - **Chuỗi hash không có khoá và không có mốc neo ngoài database.** SHA-256 trần trên các trường ai đọc bảng cũng thấy, còn `audit_chain_head` thì nằm cùng database. Ai ghi được cả hai đều có thể viết lại lịch sử rồi tính lại chuỗi cho khớp. Nó phát hiện được sự bất cẩn, không phát hiện được ý đồ. Muốn thành **chứng cứ** thì cần HMAC với khoá nằm ngoài PostgreSQL, hoặc định kỳ công bố `head_hash` ra một nơi chỉ ghi thêm ở ngoài máy. Task 1.12 sẽ dựng kho khoá, nên làm cùng lúc

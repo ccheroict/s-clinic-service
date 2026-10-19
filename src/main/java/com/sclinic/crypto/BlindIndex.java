@@ -30,7 +30,8 @@ public class BlindIndex {
     private final byte[] key;
 
     public BlindIndex(DataEncryptionProperties properties) {
-        this.key = CryptoKeys.decode(properties.indexKey(), "sclinic.crypto.index-key");
+        this.key = CryptoKeys.decode(properties.indexKey(), "sclinic.crypto.index-key",
+                "Patient identifiers are looked up through a keyed index");
     }
 
     /**

@@ -270,9 +270,18 @@ class AuditTrailIntegrationTest {
             assertThat(entry.get("staff_id")).isNotNull();
             assertThat(entry.get("session_id")).isNotNull();
             assertThat(entry.get("user_agent")).isEqualTo("JUnit-Audit");
-            // Honours the reverse-proxy header, so the real client shows up
-            // rather than the proxy.
-            assertThat(entry.get("ip")).isEqualTo("203.0.113.7");
+
+            // The peer address, not the X-Forwarded-For header the request also
+            // carries. No proxy count is configured here, and with none
+            // configured the header is ignored: anyone can send
+            // X-Forwarded-For: 10.0.0.1, so believing it would put an address of
+            // the caller's choosing in the trail, hashed into the chain next to
+            // facts the server actually established. Behaving the other way is
+            // what this assertion used to pin.
+            //
+            // The configured-proxy case, where the entry our own proxy appended
+            // is the one recorded, is covered in RequestContextResolverTest.
+            assertThat(entry.get("ip")).isEqualTo("127.0.0.1");
         }
 
         @Test
@@ -394,8 +403,14 @@ class AuditTrailIntegrationTest {
             updateFacilityName("Phong kham M");
             long middleId = secondNewestEntryId();
 
+            // Any address other than the one actually recorded. It used to be
+            // 127.0.0.1 here, which stopped being a change at all once the
+            // forwarded header was no longer trusted and 127.0.0.1 became the
+            // value every entry already held — a tampering test that tampers
+            // with nothing passes for the wrong reason.
             AuditChainVerifier.ChainVerification result = verifyAfterTampering(() ->
-                    jdbcTemplate.update("update audit_log set ip = '127.0.0.1' where id = ?", middleId));
+                    jdbcTemplate.update("update audit_log set ip = '198.51.100.254' where id = ?",
+                            middleId));
 
             assertThat(result.intact()).isFalse();
             assertThat(result.firstBrokenEntryId()).isEqualTo(middleId);

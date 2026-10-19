@@ -41,6 +41,9 @@ public final class TotpGenerator {
         return codeForStep(base32Secret, timeStep(instant));
     }
 
+    /** No step matched. Distinguishable from step 0, which is a real step. */
+    public static final long NO_MATCH = Long.MIN_VALUE;
+
     /**
      * Verifies a code, accepting neighbouring time steps to tolerate clock drift
      * between the server and the user's phone.
@@ -49,25 +52,41 @@ public final class TotpGenerator {
      *                    previous, current and next code are valid
      */
     public static boolean verify(String base32Secret, String candidate, Instant instant, int windowSteps) {
+        return matchingStep(base32Secret, candidate, instant, windowSteps) != NO_MATCH;
+    }
+
+    /**
+     * Verifies a code and reports <em>which</em> time step it belonged to.
+     *
+     * <p>The step is what makes replay detectable: the caller stores the highest
+     * step it has accepted for an account and refuses anything not strictly
+     * greater. A boolean cannot support that, because "this code is valid" is
+     * true for the whole drift window however many times it is asked.
+     *
+     * @return the matching step, or {@link #NO_MATCH}
+     */
+    public static long matchingStep(String base32Secret, String candidate, Instant instant,
+                                    int windowSteps) {
         if (base32Secret == null || candidate == null) {
-            return false;
+            return NO_MATCH;
         }
         String normalised = candidate.trim();
         if (normalised.length() != CODE_DIGITS) {
-            return false;
+            return NO_MATCH;
         }
 
         long currentStep = timeStep(instant);
-        boolean matched = false;
+        long matchedStep = NO_MATCH;
 
         // Checks every step in the window even after a match, so the work done
-        // does not reveal which step matched.
+        // does not reveal which step matched. Keeping that property is why this
+        // does not return early now that it has something to return.
         for (long step = currentStep - windowSteps; step <= currentStep + windowSteps; step++) {
             if (constantTimeEquals(codeForStep(base32Secret, step), normalised)) {
-                matched = true;
+                matchedStep = step;
             }
         }
-        return matched;
+        return matchedStep;
     }
 
     /** The otpauth URI an authenticator app consumes, usually via QR code. */

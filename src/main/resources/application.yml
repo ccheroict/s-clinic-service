@@ -74,6 +74,40 @@ sclinic:
     # confidentiality and the index together.
     index-key: ${SCLINIC_INDEX_KEY:}
 
+  audit:
+    # Key for the audit trail's hash chain. No default, same reasoning as above:
+    # the application refuses to start without it.
+    #   openssl rand -base64 32
+    #
+    # Its value lies in living outside PostgreSQL. Each link is an HMAC, so
+    # recomputing a chain that verifies needs this key as well as write access to
+    # the tables -- which means a stolen backup, SQL injection, or an
+    # administrator with database rights can no longer rewrite history and leave
+    # a trail that agrees with itself. Keep it out of the database it protects,
+    # and separate from the crypto keys above: those protect patient identifiers,
+    # this protects the record of who looked at them, and sharing one key would
+    # let a single compromise both expose the identifiers and erase the evidence.
+    #
+    # Rotating it invalidates every entry written under the old key. There is no
+    # supported rotation yet; treat it as fixed for the life of the trail.
+    chain-key: ${SCLINIC_AUDIT_CHAIN_KEY:}
+
+  network:
+    # How many reverse proxies sit in front of this application.
+    #
+    # Zero means X-Forwarded-For is ignored and the peer address is recorded.
+    # That is the default because it is the only safe one: anyone can send
+    # X-Forwarded-For, and the address recorded here goes into auth_event and is
+    # hashed into the audit chain, so believing the header unconditionally puts a
+    # value of the caller's choosing next to facts the server established.
+    #
+    # Set this to the real number of proxies once the deployment is settled. With
+    # N, the address is taken N entries from the right of the list, since each
+    # proxy appends the address it received the request from -- so the rightmost
+    # entries come from your own infrastructure and the leftmost from whoever
+    # sent the request.
+    trusted-proxy-count: ${NETWORK_TRUSTED_PROXY_COUNT:0}
+
   bootstrap:
     admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
     # Leave empty to generate a random password, printed to the log once on first

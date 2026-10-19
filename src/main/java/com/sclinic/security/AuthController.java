@@ -1,6 +1,6 @@
 package com.sclinic.security;
 
-import com.sclinic.security.authevent.RequestContext;
+import com.sclinic.security.authevent.RequestContextResolver;
 import com.sclinic.security.dto.ChangePasswordRequest;
 import com.sclinic.security.dto.LoginRequest;
 import com.sclinic.security.dto.LoginResponse;
@@ -37,16 +37,17 @@ import java.util.UUID;
 public class AuthController {
 
     private final AuthService authService;
+    private final RequestContextResolver requestContexts;
 
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request,
                                HttpServletRequest httpRequest) {
-        return authService.login(request, RequestContext.from(httpRequest));
+        return authService.login(request, requestContexts.resolve(httpRequest));
     }
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(HttpServletRequest httpRequest) {
-        authService.logout(BearerTokenReader.read(httpRequest), RequestContext.from(httpRequest));
+        authService.logout(BearerTokenReader.read(httpRequest), requestContexts.resolve(httpRequest));
         return ResponseEntity.noContent().build();
     }
 
@@ -58,14 +59,14 @@ public class AuthController {
     public LoginResponse changePassword(@Valid @RequestBody ChangePasswordRequest request,
                                         HttpServletRequest httpRequest) {
         return authService.changePassword(
-                BearerTokenReader.read(httpRequest), request, RequestContext.from(httpRequest));
+                BearerTokenReader.read(httpRequest), request, requestContexts.resolve(httpRequest));
     }
 
     @PostMapping("/revoke-sessions/{staffId}")
     @PreAuthorize("hasRole('ADMIN')")
     public Map<String, Object> revokeSessions(@PathVariable UUID staffId,
                                               HttpServletRequest httpRequest) {
-        int revoked = authService.revokeSessions(staffId, RequestContext.from(httpRequest));
+        int revoked = authService.revokeSessions(staffId, requestContexts.resolve(httpRequest));
         return Map.of("staffId", staffId, "revokedSessions", revoked);
     }
 
@@ -75,7 +76,7 @@ public class AuthController {
     @PostMapping("/mfa/enroll")
     public MfaEnrollResponse beginMfaEnrolment(HttpServletRequest httpRequest) {
         MfaService.Enrolment enrolment = authService.beginMfaEnrolment(
-                BearerTokenReader.read(httpRequest), RequestContext.from(httpRequest));
+                BearerTokenReader.read(httpRequest), requestContexts.resolve(httpRequest));
         return new MfaEnrollResponse(enrolment.secret(), enrolment.provisioningUri());
     }
 
@@ -85,7 +86,7 @@ public class AuthController {
                                                   HttpServletRequest httpRequest) {
         AuthService.MfaConfirmResult result = authService.confirmMfaEnrolment(
                 BearerTokenReader.read(httpRequest), request.code(),
-                RequestContext.from(httpRequest));
+                requestContexts.resolve(httpRequest));
         return new MfaConfirmResponse(result.session(), result.backupCodes());
     }
 
@@ -95,7 +96,7 @@ public class AuthController {
                                    HttpServletRequest httpRequest) {
         return authService.verifyMfa(
                 BearerTokenReader.read(httpRequest), request.code(),
-                RequestContext.from(httpRequest));
+                requestContexts.resolve(httpRequest));
     }
 
     /**
@@ -107,7 +108,7 @@ public class AuthController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> resetMfa(@PathVariable UUID staffId,
                                          HttpServletRequest httpRequest) {
-        authService.resetMfa(staffId, RequestContext.from(httpRequest));
+        authService.resetMfa(staffId, requestContexts.resolve(httpRequest));
         return ResponseEntity.noContent().build();
     }
 }

@@ -1,7 +1,13 @@
 package com.sclinic.audit;
 
+import com.sclinic.crypto.CryptoKeys;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -10,10 +16,26 @@ import java.util.TreeMap;
 import java.util.UUID;
 
 /**
- * The link in the audit hash chain: SHA-256 over an entry plus the hash of the
- * entry before it.
+ * The link in the audit hash chain: HMAC-SHA256 over an entry plus the hash of
+ * the entry before it.
  *
- * <p>Pure and stateless on purpose, so the exact bytes that get hashed can be
+ * <p><b>Keyed, and the key is the point.</b> This was a bare SHA-256 until the
+ * review of task 1.9c. Every field it covers is readable from {@code audit_log},
+ * and the expected head hash sits in {@code audit_chain_head} in the same
+ * database, so anyone able to write both tables could alter history and recompute
+ * a chain that agreed with itself end to end. An unkeyed digest detects
+ * carelessness — a bug, a careless migration, an operator editing a row — but not
+ * intent. With an HMAC the recomputation needs {@code sclinic.audit.chain-key},
+ * which lives in the process environment and not in PostgreSQL, so database
+ * access alone is no longer enough to forge a consistent trail.
+ *
+ * <p>Still not defended against: whoever holds the database <em>and</em> this
+ * process's environment. Closing that needs the head hash published somewhere
+ * append-only off the box, which is infrastructure rather than code.
+ *
+ * <p>A bean rather than static methods, which is what it was. The key has to come
+ * from configuration and a static method has nowhere to read it from. The
+ * canonical-form logic below stays pure, so the exact bytes covered can still be
  * pinned down by tests.
  *
  * <p>The canonical form is <b>length-prefixed</b> rather than
@@ -31,24 +53,44 @@ import java.util.UUID;
  * trip through the database.
  *
  * <p>Once entries exist in production this format is frozen: changing it makes
- * every previously written entry fail verification.
+ * every previously written entry fail verification. The move from SHA-256 to
+ * HMAC was made before any production deployment, which is the only point at
+ * which it could be made at all — afterwards it would have required either
+ * rewriting every stored hash, which is exactly the capability the chain exists
+ * to deny, or keeping both algorithms and a flag saying which applied to each
+ * entry, which hands an attacker the choice.
  */
-final class AuditHash {
+@Component
+public class AuditHash {
 
     private static final String NULL_LENGTH = "-1:";
+    private static final String MAC_ALGORITHM = "HmacSHA256";
 
     /** Type tags for detail values, written as parts of their own. */
     private static final String TAG_TEXT = "t";
     private static final String TAG_MAP = "m";
 
-    private AuditHash() {
+    private final byte[] key;
+
+    // Explicit, because the byte[] constructor below is also a candidate and two
+    // constructors with no marked one makes Spring look for a default instead.
+    @Autowired
+    public AuditHash(AuditChainProperties properties) {
+        this(CryptoKeys.decode(properties.chainKey(), "sclinic.audit.chain-key",
+                "The audit trail is chained with a keyed hash so that database access alone "
+                        + "cannot rewrite it"));
+    }
+
+    /** For tests, which need a fixed key to pin the canonical form against. */
+    AuditHash(byte[] key) {
+        this.key = key.clone();
     }
 
     /**
      * @param prevHash hash of the preceding entry, or null for the first one
-     * @return lowercase hex SHA-256 of the canonical form
+     * @return lowercase hex HMAC-SHA256 of the canonical form
      */
-    static String of(String prevHash, UUID staffId, String action, String entityType, UUID entityId,
+    public String of(String prevHash, UUID staffId, String action, String entityType, UUID entityId,
                      Map<String, Object> detail, String ip, String userAgent, UUID sessionId,
                      Instant createdAt) {
 
@@ -64,11 +106,11 @@ final class AuditHash {
         append(canonical, sessionId);
         append(canonical, createdAt);
 
-        return sha256(canonical.toString());
+        return mac(canonical.toString());
     }
 
     /** Recomputes the hash a stored entry should have, for verification. */
-    static String of(String prevHash, AuditLog entry) {
+    public String of(String prevHash, AuditLog entry) {
         return of(prevHash, entry.getStaffId(), entry.getAction(), entry.getEntityType(),
                 entry.getEntityId(), entry.getDetail(), entry.getIp(), entry.getUserAgent(),
                 entry.getSessionId(), entry.getCreatedAt());
@@ -127,13 +169,15 @@ final class AuditHash {
         target.append(text.length()).append(':').append(text);
     }
 
-    private static String sha256(String input) {
+    private String mac(String input) {
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is mandated by the JCA spec; unreachable on a valid JVM.
-            throw new IllegalStateException("SHA-256 unavailable", e);
+            Mac hmac = Mac.getInstance(MAC_ALGORITHM);
+            hmac.init(new SecretKeySpec(key, MAC_ALGORITHM));
+            return HexFormat.of()
+                    .formatHex(hmac.doFinal(input.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            // HmacSHA256 is mandated by the JCA spec; unreachable on a valid JVM.
+            throw new IllegalStateException("HmacSHA256 unavailable", e);
         }
     }
 }

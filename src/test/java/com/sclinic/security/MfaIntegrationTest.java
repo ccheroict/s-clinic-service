@@ -89,6 +89,9 @@ class MfaIntegrationTest {
     @Autowired
     PasswordEncoder passwordEncoder;
 
+    @Autowired
+    com.sclinic.security.mfa.MfaService mfaService;
+
     /** Returns the admin to the state the seeder left it in. */
     @BeforeEach
     void resetAdminAccount() {
@@ -101,6 +104,10 @@ class MfaIntegrationTest {
         admin.setTotpSecret(null);
         admin.setTotpEnabled(false);
         admin.setTotpConfirmedAt(null);
+        // Cleared too, or each test would inherit the previous test's replay
+        // high-water mark and the class would only pass in the order it happens
+        // to run in.
+        admin.setTotpLastStep(null);
         staffRepository.save(admin);
 
         backupCodeRepository.deleteAll();
@@ -138,6 +145,27 @@ class MfaIntegrationTest {
         return TotpGenerator.codeAt(secret, Instant.now());
     }
 
+    /**
+     * A valid code from the <em>next</em> time step.
+     *
+     * <p>Needed because codes are now single-use. Enrolment consumes the current
+     * step's code, so a test that enrols and then logs in within the same thirty
+     * seconds cannot present the same digits again — the server is right to
+     * refuse them, and {@code theCodeUsedToCompleteEnrolmentCannotThenLogIn}
+     * asserts exactly that. The next step's code is inside the drift window, so
+     * it is accepted, and its step is higher, so it is not a replay. Sleeping for
+     * thirty seconds would be the alternative.
+     *
+     * <p>This is also what the behaviour costs in real use: someone who logs in
+     * twice inside the same thirty-second window waits for the next code. Normal
+     * for TOTP, and cheap next to a code that stays usable for ninety seconds
+     * after anyone sees it.
+     */
+    private String nextStepCode(String secret) {
+        return TotpGenerator.codeAt(
+                secret, Instant.now().plusSeconds(TotpGenerator.TIME_STEP_SECONDS));
+    }
+
     /** A six-digit code that is invalid now even allowing for clock drift. */
     private String wrongCode(String secret) {
         for (int candidate = 0; candidate < 1000; candidate++) {
@@ -157,7 +185,11 @@ class MfaIntegrationTest {
         String enrolToken = login(ADMIN_PASSWORD).get("token").asText();
         String secret = enroll(enrolToken).get("secret").asText();
 
-        String confirmBody = submitCode("/api/auth/mfa/confirm", enrolToken, currentCode(secret))
+        // Kept, because confirming enrolment consumes this code and a test needs
+        // to show it cannot then be replayed as a login.
+        String enrolmentCode = currentCode(secret);
+
+        String confirmBody = submitCode("/api/auth/mfa/confirm", enrolToken, enrolmentCode)
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         JsonNode confirmed = objectMapper.readTree(confirmBody);
@@ -175,10 +207,11 @@ class MfaIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         String fullToken = objectMapper.readTree(rotatedBody).get("token").asText();
-        return new Enrolled(secret, backupCodes, fullToken);
+        return new Enrolled(secret, backupCodes, fullToken, enrolmentCode);
     }
 
-    private record Enrolled(String secret, List<String> backupCodes, String fullToken) {
+    private record Enrolled(String secret, List<String> backupCodes, String fullToken,
+                            String enrolmentCode) {
     }
 
     private Staff admin() {
@@ -299,7 +332,7 @@ class MfaIntegrationTest {
         assertThat(admin().getTotpSecret()).isNotNull();
 
         String pending = login(ROTATED_PASSWORD).get("token").asText();
-        submitCode("/api/auth/mfa/verify", pending, currentCode(enrolled.secret()))
+        submitCode("/api/auth/mfa/verify", pending, nextStepCode(enrolled.secret()))
                 .andExpect(status().isOk());
     }
 
@@ -353,7 +386,7 @@ class MfaIntegrationTest {
         Enrolled enrolled = enrolAndRotate();
         String pending = login(ROTATED_PASSWORD).get("token").asText();
 
-        String body = submitCode("/api/auth/mfa/verify", pending, currentCode(enrolled.secret()))
+        String body = submitCode("/api/auth/mfa/verify", pending, nextStepCode(enrolled.secret()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.scope").value("FULL"))
                 .andReturn().getResponse().getContentAsString();
@@ -368,11 +401,102 @@ class MfaIntegrationTest {
         Enrolled enrolled = enrolAndRotate();
         String pending = login(ROTATED_PASSWORD).get("token").asText();
 
-        submitCode("/api/auth/mfa/verify", pending, currentCode(enrolled.secret()))
+        submitCode("/api/auth/mfa/verify", pending, nextStepCode(enrolled.secret()))
                 .andExpect(status().isOk());
 
-        submitCode("/api/auth/mfa/verify", pending, currentCode(enrolled.secret()))
+        submitCode("/api/auth/mfa/verify", pending, nextStepCode(enrolled.secret()))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- single use of a TOTP code (RFC 6238 section 5.2) ----------
+
+    @Test
+    void aCodeThatHasBeenUsedOnceIsRefusedTheSecondTime() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+        // Next step, because enrolment already consumed this step's code.
+        String code = nextStepCode(enrolled.secret());
+
+        String firstPending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", firstPending, code).andExpect(status().isOk());
+
+        // A fresh login, so the interim token is not the thing being spent. The
+        // same six digits are still inside the drift window and were accepted a
+        // moment ago; before this they stayed usable for the whole window, so
+        // anyone who saw them once — over a shoulder, in a phishing form, in a
+        // proxy log — could log in with them.
+        String secondPending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", secondPending, code)
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void theReplayIsReportedAsAnInvalidCodeAndNotAsAnAlreadyUsedOne() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+        String code = nextStepCode(enrolled.secret());
+
+        String firstPending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", firstPending, code).andExpect(status().isOk());
+
+        String secondPending = login(ROTATED_PASSWORD).get("token").asText();
+        String replayBody = submitCode("/api/auth/mfa/verify", secondPending, code)
+                .andReturn().getResponse().getContentAsString();
+
+        String wrongBody = submitCode("/api/auth/mfa/verify",
+                login(ROTATED_PASSWORD).get("token").asText(), wrongCode(enrolled.secret()))
+                .andReturn().getResponse().getContentAsString();
+
+        // Identical answers on purpose. "That code was already used" tells
+        // someone holding a stolen code that they have the right code and only
+        // arrived late, which is precisely what they want to learn.
+        assertThat(replayBody).isEqualTo(wrongBody);
+    }
+
+    @Test
+    void theStepOfTheUsedCodeIsRecordedOnTheAccount() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+
+        // Enrolment itself consumes a code, so a step is already recorded.
+        Long afterEnrolment = admin().getTotpLastStep();
+        assertThat(afterEnrolment).isNotNull();
+
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", pending, nextStepCode(enrolled.secret()))
+                .andExpect(status().isOk());
+
+        // One number, not a table of used codes, and it moves forward. Steps only
+        // ever increase, so a high-water mark answers the only question asked —
+        // and a table of authentication attempts would need pruning and would
+        // otherwise become a growing record of exactly when each member of staff
+        // was at work.
+        assertThat(admin().getTotpLastStep()).isGreaterThan(afterEnrolment);
+    }
+
+    @Test
+    void theCodeUsedToCompleteEnrolmentCannotThenLogIn() throws Exception {
+        // Enrolment and verification share the claim, so the code that proved the
+        // authenticator works cannot immediately be replayed as a login. Without
+        // this the first ninety seconds after enrolment had a reusable code in
+        // them, which is the window a shoulder-surfer gets.
+        Enrolled enrolled = enrolAndRotate();
+        String enrolmentCode = enrolled.enrolmentCode();
+
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", pending, enrolmentCode)
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aResetClearsTheReplayMarkSoTheNextEnrolmentIsNotBlocked() throws Exception {
+        enrolAndRotate();
+        assertThat(admin().getTotpLastStep()).isNotNull();
+
+        Staff reset = admin();
+        mfaService.reset(reset);
+
+        // A new secret produces unrelated codes, so keeping the old high-water
+        // mark would only reject the first valid code of the new factor whenever
+        // re-enrolment landed on an earlier step than the last login.
+        assertThat(admin().getTotpLastStep()).isNull();
     }
 
     @Test

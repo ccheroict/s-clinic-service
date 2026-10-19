@@ -1,46 +1,22 @@
 package com.sclinic.security.authevent;
 
-import jakarta.servlet.http.HttpServletRequest;
-
 /**
  * The caller's network context, captured for security forensics.
  *
- * @param ip        client address, honouring a reverse proxy header when present
- * @param userAgent client user agent, truncated to keep log rows bounded
+ * <p>Built by {@link RequestContextResolver}. There is deliberately no static
+ * factory taking an {@code HttpServletRequest}: deciding whether to believe
+ * {@code X-Forwarded-For} requires knowing how many proxies are in front of the
+ * application, a static method has nowhere to read that from, and the version
+ * that existed here before simply trusted the header. Keeping a convenient
+ * unsafe path alongside the safe one guarantees the unsafe one gets used.
+ *
+ * @param ip        client address as far as it can be established
+ * @param userAgent client user agent, truncated to keep rows bounded
  */
 public record RequestContext(String ip, String userAgent) {
 
-    private static final int MAX_USER_AGENT_LENGTH = 512;
-
-    public static RequestContext from(HttpServletRequest request) {
-        if (request == null) {
-            return new RequestContext(null, null);
-        }
-        return new RequestContext(clientIp(request), userAgent(request));
-    }
-
-    /**
-     * Trusts {@code X-Forwarded-For} only for its first entry. The clinic runs
-     * behind a single reverse proxy; if that changes, this is the one place to
-     * revisit.
-     */
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            int comma = forwarded.indexOf(',');
-            String first = comma > 0 ? forwarded.substring(0, comma) : forwarded;
-            return first.trim();
-        }
-        return request.getRemoteAddr();
-    }
-
-    private static String userAgent(HttpServletRequest request) {
-        String agent = request.getHeader("User-Agent");
-        if (agent == null) {
-            return null;
-        }
-        return agent.length() > MAX_USER_AGENT_LENGTH
-                ? agent.substring(0, MAX_USER_AGENT_LENGTH)
-                : agent;
+    /** For work with no request behind it: startup seeding, scheduled jobs. */
+    public static RequestContext none() {
+        return new RequestContext(null, null);
     }
 }

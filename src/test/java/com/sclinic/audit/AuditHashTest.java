@@ -3,6 +3,7 @@ package com.sclinic.audit;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
@@ -26,10 +27,22 @@ class AuditHashTest {
     private static final UUID SESSION = UUID.fromString("33333333-3333-3333-3333-333333333333");
     private static final Instant AT = Instant.parse("2026-08-29T03:00:00.123456Z");
 
+    /**
+     * A fixed key, so the canonical form stays pinnable.
+     *
+     * <p>The digest is keyed now, which means these tests check relationships
+     * between hashes — same input, same output; different input, different output
+     * — rather than literal digest values. That was already how they were
+     * written, so the key only has to be constant within a run.
+     */
+    private static final byte[] KEY = "audit-hash-test-key".getBytes(StandardCharsets.UTF_8);
+
+    private final AuditHash auditHash = new AuditHash(KEY);
+
     private String hash(String prevHash, UUID staffId, String action, String entityType, UUID entityId,
                         Map<String, Object> detail, String ip, String userAgent, UUID sessionId,
                         Instant createdAt) {
-        return AuditHash.of(prevHash, staffId, action, entityType, entityId, detail, ip, userAgent,
+        return auditHash.of(prevHash, staffId, action, entityType, entityId, detail, ip, userAgent,
                 sessionId, createdAt);
     }
 
@@ -279,6 +292,6 @@ class AuditHashTest {
         entry.setSessionId(SESSION);
         entry.setCreatedAt(AT);
 
-        assertThat(AuditHash.of("prev", entry)).isEqualTo(baseline());
+        assertThat(auditHash.of("prev", entry)).isEqualTo(baseline());
     }
 }

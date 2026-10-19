@@ -74,6 +74,20 @@ public class Staff {
     @Column(name = "totp_confirmed_at")
     private Instant totpConfirmedAt;
 
+    /**
+     * Time step of the last accepted TOTP code.
+     *
+     * <p>A code whose step is not strictly greater is refused as a replay. Null
+     * until the first successful verification.
+     *
+     * <p>Never written through this field. {@code StaffRepository.advanceTotpStep}
+     * updates it conditionally, because two requests presenting the same code at
+     * the same moment would both read the same value here and both decide they
+     * were first.
+     */
+    @Column(name = "totp_last_step")
+    private Long totpLastStep;
+
     public boolean isLockedAt(Instant now) {
         return lockedUntil != null && now.isBefore(lockedUntil);
     }

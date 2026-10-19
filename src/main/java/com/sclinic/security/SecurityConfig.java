@@ -39,7 +39,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableConfigurationProperties({
         AuthProperties.class,
         DataEncryptionProperties.class,
-        com.sclinic.access.AccessProperties.class})
+        com.sclinic.access.AccessProperties.class,
+        com.sclinic.audit.AuditChainProperties.class,
+        com.sclinic.security.authevent.ForwardedHeaderProperties.class})
 @RequiredArgsConstructor
 public class SecurityConfig {
 

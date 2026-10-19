@@ -62,6 +62,10 @@ public class MfaService {
         staff.setTotpSecret(secret);
         staff.setTotpEnabled(false);
         staff.setTotpConfirmedAt(null);
+        // A new secret produces unrelated codes, so the old high-water mark would
+        // only serve to reject the first valid code of the new factor whenever
+        // enrolment happens to land on an earlier step than the last login.
+        staff.setTotpLastStep(null);
         staffRepository.save(staff);
 
         String uri = TotpGenerator.provisioningUri(
@@ -81,8 +85,7 @@ public class MfaService {
         if (staff.getTotpSecret() == null) {
             throw new MfaFailedException("No enrolment in progress");
         }
-        if (!TotpGenerator.verify(staff.getTotpSecret(), code, clock.instant(),
-                properties.totpWindowSteps())) {
+        if (!claimTotpCode(staff, code)) {
             throw new MfaFailedException("Invalid authentication code");
         }
 
@@ -105,14 +108,54 @@ public class MfaService {
             throw new MfaFailedException("Two-factor authentication is not set up");
         }
 
-        if (TotpGenerator.verify(staff.getTotpSecret(), code, clock.instant(),
-                properties.totpWindowSteps())) {
+        if (claimTotpCode(staff, code)) {
             return;
         }
         if (consumeBackupCode(staff.getId(), code)) {
             return;
         }
         throw new MfaFailedException("Invalid authentication code");
+    }
+
+    /**
+     * Verifies a TOTP code and consumes it, so it cannot be presented again.
+     *
+     * <p>RFC 6238 section 5.2 requires a verifier to reject a code it has already
+     * accepted. Without this, a code stayed usable for the whole drift window —
+     * about ninety seconds with a window of one step — so anyone who saw it once,
+     * over a shoulder or in a phishing form or a proxy log, could use it again,
+     * and the second use was indistinguishable from the first.
+     *
+     * <p>Returns false rather than throwing, so callers can fall through to a
+     * backup code. A replayed code and a wrong code are both reported as invalid
+     * on purpose: telling the caller "that code was already used" confirms to
+     * someone holding a stolen code that it was the right one.
+     */
+    private boolean claimTotpCode(Staff staff, String code) {
+        long step = TotpGenerator.matchingStep(staff.getTotpSecret(), code, clock.instant(),
+                properties.totpWindowSteps());
+
+        if (step == TotpGenerator.NO_MATCH) {
+            return false;
+        }
+
+        Long lastStep = staff.getTotpLastStep();
+        if (lastStep != null && step <= lastStep) {
+            return false;
+        }
+
+        // The conditional update is what actually enforces single use; the check
+        // above only saves a query in the common case. Two requests with the same
+        // code at the same moment both pass that check, and exactly one gets the
+        // row here.
+        if (staffRepository.advanceTotpStep(staff.getId(), step) != 1) {
+            return false;
+        }
+
+        // Kept in step with the row so a caller that saves this instance later
+        // does not write a stale value back over it.
+        staff.setTotpLastStep(step);
+        return true;
     }
 
     /**
@@ -124,6 +167,7 @@ public class MfaService {
         staff.setTotpSecret(null);
         staff.setTotpEnabled(false);
         staff.setTotpConfirmedAt(null);
+        staff.setTotpLastStep(null);
         staffRepository.save(staff);
         backupCodeRepository.deleteByStaffId(staff.getId());
     }

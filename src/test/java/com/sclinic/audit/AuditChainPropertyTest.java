@@ -43,6 +43,19 @@ class AuditChainPropertyTest {
     private static final UUID SESSION = UUID.fromString("33333333-3333-3333-3333-333333333333");
     private static final Instant BASE = Instant.parse("2026-08-29T03:00:00Z");
 
+    /**
+     * One fixed key for the whole class.
+     *
+     * <p>The properties below are about the shape of the chain — that any single
+     * edit breaks a link, that a forged entry cannot be slotted in — and they
+     * hold for any key. What a key adds is that producing a chain which verifies
+     * now requires knowing it, which is checked separately in
+     * {@code AuditChainKeyTest}.
+     */
+    private static final AuditHash AUDIT_HASH =
+            new AuditHash("audit-chain-property-test-key".getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8));
+
     // ---------- fixtures ----------
 
     /** A correctly chained trail of {@code size} entries. */
@@ -64,7 +77,7 @@ class AuditChainPropertyTest {
             entry.setSessionId(SESSION);
             entry.setCreatedAt(BASE.plusSeconds(i));
             entry.setPrevHash(prevHash);
-            entry.setEntryHash(AuditHash.of(prevHash, entry));
+            entry.setEntryHash(AUDIT_HASH.of(prevHash, entry));
 
             entries.add(entry);
             prevHash = entry.getEntryHash();
@@ -106,7 +119,9 @@ class AuditChainPropertyTest {
         AuditChainHeadRepository heads = Mockito.mock(AuditChainHeadRepository.class);
         when(heads.peekHead()).thenReturn(Optional.of(head));
 
-        return new AuditChainVerifier(logs, heads);
+        // Same key the fixtures hashed with, so the verifier is checking the
+        // chain rather than detecting a key mismatch.
+        return new AuditChainVerifier(logs, heads, AUDIT_HASH);
     }
 
     /** Keyset slice, matching what the repository query does. */
@@ -171,9 +186,9 @@ class AuditChainPropertyTest {
         AuditChainHead head = headFor(entries);
         AuditLog victim = entries.get(target);
 
-        String before = AuditHash.of(victim.getPrevHash(), victim);
+        String before = AUDIT_HASH.of(victim.getPrevHash(), victim);
         tampering.applyTo(victim);
-        String after = AuditHash.of(victim.getPrevHash(), victim);
+        String after = AUDIT_HASH.of(victim.getPrevHash(), victim);
 
         // Some tamperings are no-ops on some entries: clearing a detail that was
         // already null changes nothing, and an entry nobody altered has nothing
@@ -238,7 +253,7 @@ class AuditChainPropertyTest {
         // so the forged entry itself is internally consistent.
         String prevHash = at == 0 ? null : entries.get(at - 1).getEntryHash();
         forged.setPrevHash(prevHash);
-        forged.setEntryHash(AuditHash.of(prevHash, forged));
+        forged.setEntryHash(AUDIT_HASH.of(prevHash, forged));
 
         List<AuditLog> tampered = new ArrayList<>(entries);
         tampered.add(at, forged);
@@ -318,7 +333,7 @@ class AuditChainPropertyTest {
         AuditChainHeadRepository heads = Mockito.mock(AuditChainHeadRepository.class);
         when(heads.peekHead()).thenReturn(Optional.empty());
 
-        AuditChainVerifier.ChainVerification result = new AuditChainVerifier(logs, heads).verify();
+        AuditChainVerifier.ChainVerification result = new AuditChainVerifier(logs, heads, AUDIT_HASH).verify();
 
         assertThat(result.intact()).isFalse();
         assertThat(result.problem()).contains("head record is missing");
@@ -397,7 +412,7 @@ class AuditChainPropertyTest {
         AuditChainHeadRepository heads = Mockito.mock(AuditChainHeadRepository.class);
         when(heads.peekHead()).thenReturn(Optional.of(headFor(entries)));
 
-        AuditChainVerifier.ChainVerification result = new AuditChainVerifier(logs, heads).verify();
+        AuditChainVerifier.ChainVerification result = new AuditChainVerifier(logs, heads, AUDIT_HASH).verify();
 
         assertThat(result.intact()).isTrue();
         assertThat(result.checkedEntries()).isEqualTo(3);

@@ -11,7 +11,7 @@ import java.util.Base64;
  * while storing identity numbers in the clear. Failing at startup is the only
  * behaviour that cannot be missed.
  */
-final class CryptoKeys {
+public final class CryptoKeys {
 
     /** 128 bits is the floor for an HMAC key here; 256 is what to deploy. */
     private static final int MIN_KEY_BYTES = 16;
@@ -29,7 +29,7 @@ final class CryptoKeys {
      * application refuses to start instead.
      */
     static byte[] decodeAesKey(String base64Key, String propertyName) {
-        byte[] key = decode(base64Key, propertyName);
+        byte[] key = decode(base64Key, propertyName, "Patient identifiers are encrypted at rest");
 
         if (key.length != 16 && key.length != 24 && key.length != 32) {
             throw new IllegalStateException(propertyName + " must decode to exactly 16, 24 or 32 "
@@ -39,12 +39,22 @@ final class CryptoKeys {
         return key;
     }
 
-    static byte[] decode(String base64Key, String propertyName) {
+    /**
+     * Decodes and length-checks a base64 key, or refuses to let the application
+     * start.
+     *
+     * <p>Public because the audit chain's HMAC key needs the same treatment and
+     * the same wording. Two copies of "there is no default, fail at startup"
+     * would drift, and the copy that drifted would be the one that quietly
+     * grew a fallback.
+     *
+     * @param purpose what breaks without this key, for the error message
+     */
+    public static byte[] decode(String base64Key, String propertyName, String purpose) {
         if (base64Key == null || base64Key.isBlank()) {
             throw new IllegalStateException(
-                    propertyName + " is not set. Patient identifiers are encrypted at rest, so the "
-                            + "application will not start without a key. Generate one with: "
-                            + "openssl rand -base64 32");
+                    propertyName + " is not set. " + purpose + ", so the application will not "
+                            + "start without a key. Generate one with: openssl rand -base64 32");
         }
 
         byte[] key;

@@ -1,6 +1,7 @@
 package com.sclinic.audit;
 
 import com.sclinic.security.authevent.RequestContext;
+import com.sclinic.security.authevent.RequestContextResolver;
 import com.sclinic.staff.Staff;
 import com.sclinic.staff.StaffRepository;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,8 @@ public class AuditService {
     private final AuditLogRepository auditLogRepository;
     private final AuditChainHeadRepository chainHeadRepository;
     private final StaffRepository staffRepository;
+    private final RequestContextResolver requestContexts;
+    private final AuditHash auditHash;
     private final Clock clock;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -62,7 +65,7 @@ public class AuditService {
         Instant createdAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
         Map<String, Object> safeDetail = detail == null || detail.isEmpty() ? null : detail;
 
-        String entryHash = AuditHash.of(prevHash, staffId, action.name(), entityType, entityId,
+        String entryHash = auditHash.of(prevHash, staffId, action.name(), entityType, entityId,
                 safeDetail, context.ip(), context.userAgent(), sessionId, createdAt);
 
         AuditLog entry = new AuditLog();
@@ -128,8 +131,8 @@ public class AuditService {
     private RequestContext currentRequestContext() {
         RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
         if (attributes instanceof ServletRequestAttributes servletAttributes) {
-            return RequestContext.from(servletAttributes.getRequest());
+            return requestContexts.resolve(servletAttributes.getRequest());
         }
-        return new RequestContext(null, null);
+        return RequestContext.none();
     }
 }
