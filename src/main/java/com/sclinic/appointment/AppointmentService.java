@@ -254,8 +254,9 @@ public class AppointmentService {
             to = date.plusDays(1).atStartOfDay(zone).toInstant();
         }
 
-        // 3. Query with filters and pagination
-        Page<Appointment> page = appointmentRepository.findWithFilters(from, to, doctorId, status, pageable);
+        // 3. Query with whichever filters were supplied, and page it
+        Page<Appointment> page = appointmentRepository.findAll(
+                AppointmentSpecifications.matching(from, to, doctorId, status), pageable);
 
         // 4. Record the read when it reached beyond the caller's own patients.
         //

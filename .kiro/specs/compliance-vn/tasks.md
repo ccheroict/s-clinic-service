@@ -283,7 +283,28 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
         chú ở mục hiệu năng đã hẹn. Danh sách bệnh nhân là trang hay mở nhất, nên
         đây là việc cần làm trước khi lên production
 
-    - [ ] **MỚI PHÁT HIỆN 19/10/2026 — `GET /api/appointments` vỡ khi thiếu bộ lọc**
+    - [x] **ĐÃ SỬA 20/10/2026 — `GET /api/appointments` vỡ khi thiếu bộ lọc**
+      Thay JPQL bằng `Specification` (`AppointmentSpecifications.matching`): bộ
+      lọc nào không được truyền thì KHÔNG góp vế nào. Không còn phép so sánh với
+      null nên không còn gì để driver suy kiểu, và câu lệnh chỉ chứa đúng điều
+      kiện được hỏi — nhờ đó planner dùng được index trên `scheduled_at` và
+      `doctor_id` thay vì phải đi qua chuỗi `or` không bao giờ thoả.
+      - **Bỏ hai test cũ** xác minh "doctorId có được truyền vào repository" và
+        "date có đổi thành khoảng Instant". Chính kiểu test đó đã che lỗi: mock
+        không chạy SQL, nên một câu truy vấn không thể chạy trông y hệt câu chạy
+        được. Thay bằng `AppointmentListIntegrationTest` (12 test, DB
+        `appointment_list_it`) kiểm chứng bằng KẾT QUẢ: danh sách của bác sĩ được
+        lọc khi lịch của bác sĩ kia KHÔNG có trong response
+      - Test đầu tiên trong class là trường hợp KHÔNG bộ lọc, vì đó là request mà
+        client thật gửi và là cái đã vỡ. Có test liệt kê MỌI tổ hợp thiếu bộ lọc,
+        vì lỗi xảy ra theo từng tham số
+      - Chốt luôn biên của bộ lọc ngày: ngày làm việc hết lúc nửa đêm theo
+        `Asia/Ho_Chi_Minh` chứ không theo UTC, và biên trên là loại trừ — nên lịch
+        hẹn 23:00 giờ địa phương thuộc đúng ngày nó trông như vậy, còn lịch đầu
+        tiên của ngày mai không lọt vào
+      - Đã trả lại hai test audit lịch hẹn giữ lại từ commit trước
+
+    - [ ] ~~MỚI PHÁT HIỆN 19/10/2026 — `GET /api/appointments` vỡ khi thiếu bộ lọc~~
       `AppointmentRepository.findWithFilters` viết bằng các vế
       `(? is null or column = ?)`. PostgreSQL KHÔNG suy ra được kiểu cho một tham
       số trần đem so với null, nên câu truy vấn là `SQLGrammarException` mỗi khi

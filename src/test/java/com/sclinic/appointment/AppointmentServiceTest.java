@@ -22,7 +22,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
+import org.mockito.ArgumentMatchers;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
@@ -499,13 +501,26 @@ class AppointmentServiceTest {
     @Nested
     class ListTests {
 
+        /*
+         * Only the mapping is checked here now.
+         *
+         * Two tests used to live alongside this one, verifying that a doctor's
+         * id and a date range were passed to the repository. They asserted the
+         * arguments of a mocked call, which is how this endpoint stayed broken:
+         * the query they described could not execute at all on PostgreSQL, and a
+         * mock never runs SQL. The filters are now checked by their results in
+         * AppointmentListIntegrationTest, against a real database, where
+         * "filtered by doctor" means the other doctor's appointments are absent
+         * rather than that an argument was non-null.
+         */
         @Test
         void returnsMappedPage() {
             Appointment appt = buildAppointment(UUID.randomUUID(), AppointmentStatus.BOOKED);
             Page<Appointment> page = new PageImpl<>(List.of(appt));
             Pageable pageable = PageRequest.of(0, 20);
 
-            when(appointmentRepository.findWithFilters(any(), any(), any(), any(), eq(pageable)))
+            when(appointmentRepository.findAll(ArgumentMatchers.<Specification<Appointment>>any(),
+                    eq(pageable)))
                     .thenReturn(page);
             when(patientRepository.findById(appt.getPatientId()))
                     .thenReturn(Optional.of(buildPatient(appt.getPatientId())));
@@ -516,38 +531,6 @@ class AppointmentServiceTest {
             Page<AppointmentResponse> result = service.list(null, null, null, pageable, UUID.randomUUID(), "ADMIN");
 
             assertThat(result.getContent()).hasSize(1);
-        }
-
-        @Test
-        void doctorRole_autoFiltersByDoctorId() {
-            UUID doctorStaffId = UUID.randomUUID();
-            Pageable pageable = PageRequest.of(0, 20);
-            Page<Appointment> emptyPage = new PageImpl<>(List.of());
-
-            when(appointmentRepository.findWithFilters(isNull(), isNull(), eq(doctorStaffId), isNull(), eq(pageable)))
-                    .thenReturn(emptyPage);
-
-            Page<AppointmentResponse> result = service.list(null, null, null, pageable, doctorStaffId, "DOCTOR");
-
-            assertThat(result.getContent()).isEmpty();
-            verify(appointmentRepository).findWithFilters(isNull(), isNull(), eq(doctorStaffId), isNull(), eq(pageable));
-        }
-
-        @Test
-        void dateFilter_convertsToInstantRange() {
-            LocalDate date = LocalDate.of(2025, 3, 10);
-            Pageable pageable = PageRequest.of(0, 20);
-            Page<Appointment> emptyPage = new PageImpl<>(List.of());
-
-            when(appointmentRepository.findWithFilters(any(Instant.class), any(Instant.class), isNull(), isNull(), eq(pageable)))
-                    .thenReturn(emptyPage);
-
-            service.list(date, null, null, pageable, UUID.randomUUID(), "ADMIN");
-
-            verify(appointmentRepository).findWithFilters(
-                    argThat(from -> from != null && from.toString().contains("2025-03-09")),
-                    argThat(to -> to != null && to.toString().contains("2025-03-10")),
-                    isNull(), isNull(), eq(pageable));
         }
     }
 }

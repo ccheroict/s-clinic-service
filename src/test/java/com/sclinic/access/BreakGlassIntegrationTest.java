@@ -290,23 +290,25 @@ class BreakGlassIntegrationTest {
             assertThat(entry.get("detail").toString()).contains("true");
         }
 
-        /*
-         * The equivalent tests for GET /api/appointments are not here yet, and
-         * deliberately so.
-         *
-         * AppointmentService.list does write the audit entry, and the code for it
-         * is in this commit. The endpoint itself cannot be driven from a test:
-         * AppointmentRepository.findWithFilters is built from
-         * (? is null or column = ?) clauses, and PostgreSQL will not infer a type
-         * for a bare parameter compared against null, so the query is a SQL
-         * grammar error whenever any filter is left out — with or without a date.
-         *
-         * That is a pre-existing fault these tests uncovered rather than caused,
-         * and it is larger than this batch: the endpoint is effectively unusable
-         * unless a client supplies every filter. Opening it properly, with a test
-         * that pins the unfiltered case, is its own item in task 1.9c rather than
-         * something to bolt onto an audit change.
-         */
+        @Test
+        void aReceptionistListingTheScheduleIsRecorded() throws Exception {
+            // An appointment list is a list of who is attending a dermatology
+            // clinic and when, which is health data about everyone on it whether
+            // or not a clinical field is attached.
+            //
+            // These two tests were held back for one commit: the endpoint could
+            // not be called at all, because its query compared parameters against
+            // null and PostgreSQL rejected the statement. Fixed since, with the
+            // unfiltered case pinned in AppointmentListIntegrationTest.
+            assertThat(listEntries("appointment", receptionistToken, "/api/appointments"))
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void aDoctorListingTheirOwnScheduleIsNotRecorded() throws Exception {
+            assertThat(listEntries("appointment", treatingDoctorToken, "/api/appointments"))
+                    .isZero();
+        }
 
         @Test
         void theListEntryJoinsTheHashChainLikeAnyOther() throws Exception {

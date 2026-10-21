@@ -1,8 +1,7 @@
 package com.sclinic.appointment;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -10,7 +9,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public interface AppointmentRepository extends JpaRepository<Appointment, UUID> {
+public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
+        JpaSpecificationExecutor<Appointment> {
 
     /**
      * Whether this doctor treats this patient.
@@ -60,21 +60,13 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
             @Param("endTime") Instant endTime,
             @Param("excludeId") UUID excludeId);
 
-    /**
-     * Phân trang + lọc với các tham số tùy chọn (AND logic).
-     * Nếu tham số là null thì bỏ qua điều kiện đó.
+    /*
+     * The filtered list is a Specification, not a method here.
+     *
+     * It used to be a JPQL query with a (:param IS NULL OR column = :param)
+     * clause per filter, which fails outright on PostgreSQL: that compiles to
+     * (? is null or ...), the driver cannot infer a type for a bare parameter
+     * compared against null, and the statement is rejected whenever any filter
+     * is omitted. See AppointmentSpecifications.
      */
-    @Query("""
-            SELECT a FROM Appointment a
-            WHERE (:from IS NULL OR a.scheduledAt >= :from)
-              AND (:to IS NULL OR a.scheduledAt < :to)
-              AND (:doctorId IS NULL OR a.doctorId = :doctorId)
-              AND (:status IS NULL OR a.status = :status)
-            """)
-    Page<Appointment> findWithFilters(
-            @Param("from") Instant from,
-            @Param("to") Instant to,
-            @Param("doctorId") UUID doctorId,
-            @Param("status") AppointmentStatus status,
-            Pageable pageable);
 }
