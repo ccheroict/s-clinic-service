@@ -1,6 +1,7 @@
 package com.sclinic.facility;
 
 import com.sclinic.audit.AuditAction;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
 import com.sclinic.common.exception.NotFoundException;
@@ -46,7 +47,7 @@ public class FacilityService {
         repository.findByKcbCode(request.kcbCode())
                 .filter(other -> !other.getId().equals(facility.getId()))
                 .ifPresent(other -> {
-                    throw new IllegalArgumentException(
+                    throw new BadRequestException(
                             "kcbCode already used by another facility: " + request.kcbCode());
                 });
 

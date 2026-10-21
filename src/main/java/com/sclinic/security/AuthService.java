@@ -30,8 +30,19 @@ import java.util.UUID;
  *
  * <p>Every path through here records an {@link AuthEventType}, including the
  * failures, because a burst of failures is the signal a security review needs.
- * Failure responses are uniform so an attacker cannot tell an unknown account
- * from a wrong password from a locked account.
+ *
+ * <p><b>How much a failure says.</b> At {@code login}, nothing: an unknown
+ * account, a wrong password and a locked account all produce the same response,
+ * because the caller has proved nothing and any difference between those answers
+ * is a way to find out which usernames exist. Past that point the caller holds a
+ * token bound to one account, so there is no longer anything to enumerate, and
+ * failures say what went wrong — a wrong current password, an expired pending
+ * login, a code that did not verify. Flattening those would cost a user the
+ * chance of fixing their own mistake and buy nothing, since the account is
+ * already known to whoever holds the token.
+ *
+ * <p>The one thing never distinguished past login is a replayed authentication
+ * code from a wrong one: see {@code MfaService.claimTotpCode}.
  */
 @Service
 @RequiredArgsConstructor
@@ -147,9 +158,32 @@ public class AuthService {
                 .filter(Staff::isActive)
                 .orElseThrow(AuthenticationFailedException::new);
 
-        if (!passwordEncoder.matches(request.currentPassword(), staff.getPasswordHash())) {
+        // A locked account cannot change its password either. Without this, the
+        // lockout stops the login endpoint and leaves this one open, and this one
+        // also takes the current password — so the lock would just move the
+        // guessing to a different URL.
+        if (staff.isLockedAt(clock.instant())) {
             authEventLogger.failure(AuthEventType.PASSWORD_CHANGE_REJECTED, staff.getUsername(),
-                    staff.getId(), context, "current password did not match");
+                    staff.getId(), context, "account locked");
+            throw new AuthenticationFailedException();
+        }
+
+        if (!passwordEncoder.matches(request.currentPassword(), staff.getPasswordHash())) {
+            // Counted toward the lockout, like a failed login. The current
+            // password field is a password oracle: before this, the login
+            // endpoint allowed five guesses and then locked, while this endpoint
+            // allowed unlimited guesses at the same secret for anyone holding any
+            // session — including a stolen one, where guessing the password is
+            // precisely the step from "can act as this user now" to "can act as
+            // them whenever they like".
+            loginAttemptTracker.registerFailure(staff.getId(), staff.getUsername(), context,
+                    AuthEventType.PASSWORD_CHANGE_REJECTED, "current password did not match");
+
+            // Named rather than uniform, unlike the login failures. The caller
+            // already holds a valid token for this account, so they have proved
+            // which account they are: there is nothing left to enumerate, and a
+            // blank refusal would only leave someone retyping a correct new
+            // password while the old one was the problem.
             throw new AuthenticationFailedException("Current password is incorrect");
         }
 
@@ -258,6 +292,56 @@ public class AuthService {
         return toResponse(staff, issued);
     }
 
+    /**
+     * Issues a fresh set of recovery codes, replacing any outstanding ones.
+     *
+     * <p>Exists because the codes are shown exactly once, at the end of
+     * enrolment. Reloading that page lost them permanently, and the only way
+     * back was an administrator clearing the second factor altogether — a
+     * heavier, more disruptive operation than the problem called for, and one
+     * that leaves the account briefly without a second factor at all.
+     *
+     * <p>Requires a current authentication code as well as a full session. A
+     * full session on its own is not enough: recovery codes outlive the session
+     * that minted them and each one bypasses the second factor, so letting a
+     * session alone produce them would turn a stolen session into permanent
+     * second-factor bypass. Demanding the code means the caller is holding the
+     * authenticator now, which is the same bar {@code beginEnrolment} applies
+     * when it refuses to replace a confirmed factor.
+     *
+     * @return the plain codes, shown exactly once
+     */
+    @Transactional
+    public List<String> regenerateBackupCodes(String rawToken, String code,
+                                              RequestContext context) {
+        Staff staff = staffForScopes(rawToken, TokenScope.FULL);
+
+        if (!staff.isTotpEnabled()) {
+            // Nothing to issue codes against: recovery codes are a way past the
+            // second factor, and there is no second factor here.
+            throw new MfaFailedException("Two-factor authentication is not set up");
+        }
+
+        try {
+            mfaService.verifyChallenge(staff, code);
+        } catch (MfaFailedException e) {
+            // Counted toward the lockout for the same reason wrong codes are at
+            // the login challenge: this endpoint takes a code, so without it the
+            // endpoint is a place to guess codes without limit.
+            loginAttemptTracker.registerFailure(staff.getId(), staff.getUsername(), context,
+                    AuthEventType.MFA_FAILED, "wrong code at recovery code reissue");
+            throw e;
+        }
+
+        List<String> codes = mfaService.regenerateBackupCodes(staff.getId());
+
+        authEventLogger.record(AuthEventType.MFA_BACKUP_CODES_REISSUED, staff.getUsername(),
+                staff.getId(), true, context,
+                "replaced outstanding recovery codes with " + codes.size() + " new ones");
+
+        return codes;
+    }
+
     /** Admin recovery for a lost authenticator device. */
     @Transactional
     public void resetMfa(UUID staffId, RequestContext context) {
@@ -278,13 +362,29 @@ public class AuthService {
      */
     private Staff staffForScopes(String rawToken, TokenScope... allowed) {
         Set<TokenScope> allowedScopes = Set.of(allowed);
+
         SessionToken token = sessionTokenService.find(rawToken)
                 .filter(t -> allowedScopes.contains(t.getScope()))
-                .orElseThrow(AuthenticationFailedException::new);
+                .orElseThrow(() -> tokenRejection(rawToken));
 
         return staffRepository.findById(token.getStaffId())
                 .filter(Staff::isActive)
                 .orElseThrow(AuthenticationFailedException::new);
+    }
+
+    /**
+     * Why a token was refused, told apart where it helps the user.
+     *
+     * <p>An expired pending login and a wrong code both ended as 401 with the
+     * same wording, so the person at the screen retyped a code that was never
+     * the problem. A token that was issued and has run out is reported as
+     * expired; anything else — never issued, wrong scope, garbage — stays the
+     * uniform failure.
+     */
+    private RuntimeException tokenRejection(String rawToken) {
+        return sessionTokenService.existsButUnusable(rawToken)
+                ? new SessionExpiredException()
+                : new AuthenticationFailedException();
     }
 
     /**

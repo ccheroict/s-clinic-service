@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -97,6 +98,28 @@ public class AuthController {
         return authService.verifyMfa(
                 BearerTokenReader.read(httpRequest), request.code(),
                 requestContexts.resolve(httpRequest));
+    }
+
+    /**
+     * Replaces this account's recovery codes with a fresh set.
+     *
+     * <p>Not an admin endpoint: it is the account holder's own way back from
+     * having lost the codes, which are shown exactly once at enrolment, so
+     * reloading that page used to lose them for good and leave an administrator
+     * clearing the whole second factor as the only remedy.
+     *
+     * <p>A current authentication code is required in the body. A full session is
+     * not enough, because the codes outlive the session and each one is a way
+     * past the second factor.
+     */
+    @PostMapping("/mfa/backup-codes")
+    public Map<String, Object> regenerateBackupCodes(@Valid @RequestBody MfaCodeRequest request,
+                                                     HttpServletRequest httpRequest) {
+        List<String> codes = authService.regenerateBackupCodes(
+                BearerTokenReader.read(httpRequest), request.code(),
+                requestContexts.resolve(httpRequest));
+
+        return Map.of("backupCodes", codes);
     }
 
     /**

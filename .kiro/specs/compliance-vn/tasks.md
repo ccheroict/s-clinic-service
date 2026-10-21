@@ -153,6 +153,9 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
       hiệu năng), nên ghi kèm `detail` là số kết quả + có hay không từ khoá,
       KHÔNG ghi bản thân từ khoá (từ khoá là tên bệnh nhân)
 
+      **🔶 LÔ C ĐANG LÀM — 20/10/2026.** Backend XONG 4/6 mục, 608 → 618 test
+      xanh. Frontend mới làm 1 mục. Còn lại ghi ở cuối mục 1.9c.
+
       **Lô C — nhất quán xác thực:** cấp lại mã dự phòng (service đã có, chưa
       expose); cho phiên FULL chưa có yếu tố thứ hai tự bật MFA (giữ nguyên
       quyết định 409 khi ĐÃ có yếu tố đã xác nhận); phân biệt interim token hết
@@ -761,3 +764,80 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Soạn bản thảo trong `docs/compliance/`: hồ sơ đánh giá tác động xử lý dữ liệu cá nhân, quyết định chỉ định người phụ trách bảo vệ dữ liệu, quy trình thông báo vi phạm, hợp đồng xử lý dữ liệu với nhà cung cấp cloud, nội quy bảo mật nội bộ, tài liệu đào tạo nhân viên, mẫu đơn đồng ý cho từng loại consent
     - Đánh dấu rõ toàn bộ là bản thảo cần rà soát pháp lý trước khi sử dụng
     - _Requirements: 23.1, 23.2, 23.3, 23.4, 23.5, 23.6, 23.7_
+
+    - ### ĐIỂM DỪNG LÔ C — 20/10/2026
+      Backend 608 → 618 test xanh. Frontend 393 test xanh, typecheck + build sạch.
+
+      **ĐÃ XONG (backend):**
+
+      1. **Đổi mật khẩu giờ ĐẾM VÀO LOCKOUT, và tài khoản bị khoá không đổi được
+         mật khẩu.** Đây là lỗ hổng thật, không phải chuyện nhất quán: ô "mật
+         khẩu hiện tại" là một password oracle. Endpoint đăng nhập cho 5 lần đoán
+         rồi khoá, còn endpoint này cho đoán KHÔNG GIỚI HẠN vào cùng một bí mật,
+         với bất kỳ ai đang giữ một phiên — kể cả phiên lấy được, mà đoán ra mật
+         khẩu chính là bước từ "hành động như người đó lúc này" sang "hành động
+         như người đó bất cứ lúc nào". Thiếu kiểm tra khoá thì lockout chỉ đẩy
+         việc đoán sang một URL khác
+      2. **Phân biệt token phiên chờ HẾT HẠN với mã sai.** Thêm
+         `SessionExpiredException` → 401 kèm property `reason=SESSION_EXPIRED`, và
+         `SessionTokenService.existsButUnusable`. Token chưa từng tồn tại / sai
+         scope / rác thì VẪN là thông báo chung
+      3. **Endpoint cấp lại mã dự phòng** `POST /api/auth/mfa/backup-codes`, BẮT
+         BUỘC có mã TOTP hiện tại ngoài phiên FULL. Phiên FULL một mình KHÔNG đủ:
+         mã dự phòng sống lâu hơn phiên tạo ra chúng và mỗi mã là một đường vượt
+         qua yếu tố thứ hai, nên để phiên tự sinh ra chúng là biến một phiên bị
+         lấy thành quyền vượt yếu tố thứ hai VĨNH VIỄN. Sai mã ở đây cũng đếm vào
+         lockout. Thêm `AuthEventType.MFA_BACKUP_CODES_REISSUED` riêng, không gộp
+         vào `MFA_ENROLLED`
+      4. **`IllegalArgumentException` không còn tự động thành 400.** Thêm
+         `BadRequestException` cho lỗi client CÓ CHỦ Ý; chuyển 10 chỗ ở 6 tệp.
+         `IllegalArgumentException` trần giờ rơi xuống handler 500. Trước đó một
+         bất biến nội bộ vỡ cũng thành 400 kèm nguyên message — `Base32.decode`
+         gặp secret lưu bị hỏng sẽ trả "Not a base32 character: ?" với mã trạng
+         thái nói rằng client làm sai, mà client không làm gì sai và không đổi gì
+         được để sửa
+
+      **QUYẾT ĐỊNH VỀ "NHẤT QUÁN THÔNG BÁO LỖI" — không flatten:**
+      Javadoc của `AuthService` tuyên bố mọi thất bại đều đồng nhất; đã sửa lại
+      cho đúng sự thật và nêu rõ quy tắc. Ở `login` thì đồng nhất tuyệt đối, vì
+      người gọi chưa chứng minh được gì và mọi khác biệt đều là cách dò username
+      nào tồn tại. SAU đó người gọi đã giữ token gắn với MỘT tài khoản, nên không
+      còn gì để dò, và thông báo nói rõ cái gì sai. Flatten tiếp chỉ lấy mất cơ
+      hội tự sửa của người dùng mà không mua được gì. Ngoại lệ duy nhất vẫn giữ:
+      mã dùng lại KHÔNG BAO GIỜ phân biệt với mã sai.
+
+      Comment ở frontend `mfaErrorMessage` nói vagueness là có chủ ý vì "mã sai
+      đếm vào lockout nên phải không phân biệt được với phiên cũ" — **lập luận đó
+      không đứng vững**: token đang nói tới là token người gọi tự giữ, biết nó hết
+      hạn không cho họ thêm thông tin gì về tài khoản, cách sửa là đăng nhập lại
+      bằng mật khẩu họ vừa dùng. Việc đoán mã không dễ hơn một chút nào. Còn giá
+      phải trả thì thật: token chờ sống 10 phút, ai rời màn hình nhập mã đi nghỉ
+      rồi quay lại sẽ bị bảo "mã không đúng", đọc lại mã, gõ lại, rồi kết luận
+      ứng dụng authenticator bị lỗi.
+
+      **ĐÃ XONG (frontend):** `ApiUnauthorized.reason`, `classifyResponse` chuyển
+      tiếp `reason` cho 401 (message vẫn giữ chung chung), `authStore.sessionExpired`,
+      `MfaVerifyPage` đưa người dùng về `/login` khi token hết hạn thay vì giữ họ
+      lại gõ mã.
+
+      **CÒN LẠI CỦA LÔ C — làm tiếp hôm sau:**
+      - [ ] Frontend: UI cấp lại mã dự phòng, gọi `POST /api/auth/mfa/backup-codes`
+        (backend đã sẵn sàng, cần nhập mã TOTP). Chỗ đặt hợp lý: màn hình hồ sơ
+        cá nhân của nhân viên, hoặc một đường dẫn từ màn hình hiện mã dự phòng
+      - [ ] Frontend: cho phiên FULL chưa có yếu tố thứ hai tự bật MFA.
+        **Backend ĐÃ cho phép** (`beginMfaEnrolment` nhận cả `FULL`); chặn nằm ở
+        `MfaEnrollPage` yêu cầu scope `ENROLL_MFA`. Ảnh hưởng RECEPTIONIST muốn
+        tự nguyện bật. Giữ nguyên quyết định cũ: `beginEnrolment` vẫn trả 409 khi
+        ĐÃ có yếu tố đã xác nhận
+      - [ ] Viết test frontend cho hai mục trên
+
+    - ### CÒN LẠI SAU LÔ C
+      - [ ] **Lô D — dọn dẹp:** job xoá `session_token` hết hạn
+        (`deleteExpiredBefore` đã có, chưa ai gọi), `auth_event`,
+        `staff_password_history`
+      - [ ] **ĐO tải lên `audit_chain_head`** như Lô B đã hẹn. Danh sách bệnh
+        nhân là trang hay mở nhất và giờ mỗi lượt liệt kê của lễ tân/admin đều
+        ghi một dòng audit, tức đều xếp hàng trên một dòng duy nhất. Cần đo trước
+        khi lên production
+      - [ ] **CHẶN BỞI USER:** xác nhận không môi trường nào có dòng `V3` trong
+        `flyway_schema_history`; quyết định tách DB role cho ứng dụng

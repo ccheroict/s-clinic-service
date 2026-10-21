@@ -1,6 +1,7 @@
 package com.sclinic.allergy;
 
 import com.sclinic.allergy.dto.AllergyRecordRequest;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.allergy.dto.AllergyResponse;
 import com.sclinic.allergy.dto.AllergyRetirementRequest;
 import com.sclinic.audit.AuditAction;
@@ -119,7 +120,7 @@ public class PatientAllergyService {
                 .orElseThrow(() -> new NotFoundException("Allergy record not found: " + allergyId));
 
         if (!allergy.isActive()) {
-            throw new IllegalArgumentException("This allergy record is already retired");
+            throw new BadRequestException("This allergy record is already retired");
         }
 
         allergy.setActive(false);
@@ -175,7 +176,7 @@ public class PatientAllergyService {
 
     private void rejectFutureDate(LocalDate recordedOn) {
         if (recordedOn != null && recordedOn.isAfter(today())) {
-            throw new IllegalArgumentException("recordedOn must not be in the future");
+            throw new BadRequestException("recordedOn must not be in the future");
         }
     }
 

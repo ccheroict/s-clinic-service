@@ -75,6 +75,31 @@ public class SessionTokenService {
                 .filter(token -> token.isUsableAt(now));
     }
 
+    /**
+     * Whether this token was real and has simply run out.
+     *
+     * <p>Only for telling a user why their half-finished login stopped working.
+     * A pending MFA token lives ten minutes, and someone who leaves the code
+     * screen open over a break comes back to a token that is gone — at which
+     * point "invalid authentication code" sends them to re-read a code that was
+     * never the problem, type it again, and conclude the authenticator is broken.
+     *
+     * <p>Says nothing an attacker can use. It is only consulted for a token the
+     * caller already presented, and the answer is about that token rather than
+     * about any account: a value that was never issued and a value that expired
+     * both leave the caller equally unable to proceed.
+     */
+    @Transactional(readOnly = true)
+    public boolean existsButUnusable(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) {
+            return false;
+        }
+        Instant now = clock.instant();
+        return repository.findByTokenHash(hash(rawToken))
+                .filter(token -> !token.isUsableAt(now))
+                .isPresent();
+    }
+
     /** Looks up a usable token and records the access. */
     @Transactional
     public Optional<SessionToken> touch(String rawToken) {

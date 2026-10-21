@@ -8,6 +8,7 @@ import com.sclinic.appointment.exception.NotEditableException;
 import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.common.exception.NotFoundException;
 import com.sclinic.patient.Patient;
 import com.sclinic.patient.PatientRepository;
@@ -52,7 +53,7 @@ public class AppointmentService {
             doctor = staffRepository.findById(request.doctorId())
                     .orElseThrow(() -> new NotFoundException("Doctor not found: " + request.doctorId()));
             if (!"DOCTOR".equals(doctor.getRole())) {
-                throw new IllegalArgumentException(
+                throw new BadRequestException(
                         "Staff member " + request.doctorId() + " does not have DOCTOR role");
             }
         }
@@ -134,7 +135,7 @@ public class AppointmentService {
             Staff doctor = staffRepository.findById(request.doctorId())
                     .orElseThrow(() -> new NotFoundException("Doctor not found: " + request.doctorId()));
             if (!"DOCTOR".equals(doctor.getRole())) {
-                throw new IllegalArgumentException(
+                throw new BadRequestException(
                         "Staff member " + request.doctorId() + " does not have DOCTOR role");
             }
             auditDetail.changed("doctorId");

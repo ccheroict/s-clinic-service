@@ -1,6 +1,7 @@
 package com.sclinic.catalogue;
 
 import com.sclinic.catalogue.dto.CatalogueResponses;
+import com.sclinic.common.exception.BadRequestException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -117,12 +118,12 @@ public class CatalogueController {
 
     private java.io.InputStream read(MultipartFile file) {
         if (file.isEmpty()) {
-            throw new IllegalArgumentException("The uploaded file is empty");
+            throw new BadRequestException("The uploaded file is empty");
         }
         try {
             return file.getInputStream();
         } catch (IOException e) {
-            throw new IllegalArgumentException("Could not read the uploaded file", e);
+            throw new BadRequestException("Could not read the uploaded file", e);
         }
     }
 }

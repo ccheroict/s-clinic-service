@@ -1,6 +1,7 @@
 package com.sclinic.appointment;
 
 import com.sclinic.appointment.dto.AppointmentCreateRequest;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.appointment.dto.AppointmentResponse;
 import com.sclinic.appointment.dto.AppointmentUpdateRequest;
 import com.sclinic.appointment.dto.StatusUpdateRequest;
@@ -190,7 +191,7 @@ class AppointmentServiceTest {
         }
 
         @Test
-        void doctorWrongRole_throwsIllegalArgumentException() {
+        void doctorWrongRole_throwsBadRequest() {
             UUID patientId = UUID.randomUUID();
             UUID doctorId = UUID.randomUUID();
             AppointmentCreateRequest request = new AppointmentCreateRequest(
@@ -200,7 +201,7 @@ class AppointmentServiceTest {
             when(staffRepository.findById(doctorId)).thenReturn(Optional.of(buildNonDoctor(doctorId)));
 
             assertThatThrownBy(() -> service.create(request))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("DOCTOR role");
         }
 

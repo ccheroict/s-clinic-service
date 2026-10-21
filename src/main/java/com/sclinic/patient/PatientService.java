@@ -5,6 +5,7 @@ import com.sclinic.access.PatientAccessGuard;
 import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.common.exception.NotFoundException;
 import com.sclinic.crypto.BlindIndex;
 import com.sclinic.patient.dto.PatientDeleteRequest;
@@ -291,7 +292,7 @@ public class PatientService {
 
     private void rejectFutureDateOfDeath(LocalDate deceasedOn) {
         if (deceasedOn != null && deceasedOn.isAfter(today())) {
-            throw new IllegalArgumentException("deceasedOn must not be in the future");
+            throw new BadRequestException("deceasedOn must not be in the future");
         }
     }
 

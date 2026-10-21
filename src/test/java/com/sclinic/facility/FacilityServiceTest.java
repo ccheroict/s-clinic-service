@@ -1,6 +1,7 @@
 package com.sclinic.facility;
 
 import com.sclinic.audit.AuditAction;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.audit.AuditService;
 import com.sclinic.common.exception.NotFoundException;
 import com.sclinic.facility.dto.FacilityRequest;
@@ -143,7 +144,7 @@ class FacilityServiceTest {
             when(repository.findByKcbCode("KCB-002")).thenReturn(Optional.of(branch));
 
             assertThatThrownBy(() -> service.update(request("Ten", "KCB-002")))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("already used");
 
             verify(repository, never()).saveAndFlush(any(Facility.class));

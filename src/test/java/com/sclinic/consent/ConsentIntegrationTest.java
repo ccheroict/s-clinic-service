@@ -1,6 +1,7 @@
 package com.sclinic.consent;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.sclinic.common.exception.BadRequestException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sclinic.consent.dto.ConsentVersionRequest;
 import com.sclinic.security.dto.LoginRequest;
@@ -320,7 +321,7 @@ class ConsentIntegrationTest {
                     ConsentTypeCode.SENSITIVE_DATA,
                     new ConsentVersionRequest("Tôi đồng ý cho phòng khám xử lý dữ liệu.",
                             "Khám và điều trị", null, null)))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("nhạy cảm");
         }
 
@@ -329,7 +330,7 @@ class ConsentIntegrationTest {
             assertThatThrownBy(() -> consentService.publishVersion(
                     ConsentTypeCode.SENSITIVE_DATA,
                     new ConsentVersionRequest("Nội dung", "Khám và điều trị", "   ", null)))
-                    .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(BadRequestException.class);
         }
 
         @Test

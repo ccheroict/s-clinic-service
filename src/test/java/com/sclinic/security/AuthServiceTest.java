@@ -268,8 +268,32 @@ class AuthServiceTest {
                     new ChangePasswordRequest("wrong-current", "MoiHoanToan2027!"), CONTEXT))
                     .isInstanceOf(AuthenticationFailedException.class);
 
+            // Through the lockout tracker, which both records the event and
+            // counts it. The current password field is a password oracle: the
+            // login endpoint allowed five guesses before locking, while this one
+            // allowed unlimited guesses at the same secret for anyone holding a
+            // session — including a stolen one, where guessing the password is
+            // the step from acting as the user now to acting as them whenever.
+            verify(loginAttemptTracker).registerFailure(eq(staff.getId()), eq("bacsi"),
+                    any(), eq(AuthEventType.PASSWORD_CHANGE_REJECTED), any());
+        }
+
+        @Test
+        void refusesToChangeThePasswordOfALockedAccount() {
+            when(sessionTokenService.find("full"))
+                    .thenReturn(Optional.of(tokenWithScope(TokenScope.FULL)));
+            when(staffRepository.findById(staff.getId())).thenReturn(Optional.of(staff));
+            staff.setLockedUntil(Instant.now().plusSeconds(600));
+
+            // Otherwise the lockout stops the login endpoint and leaves this one
+            // open, and this one also takes the current password — so the lock
+            // would only move the guessing to a different URL.
+            assertThatThrownBy(() -> service.changePassword("full",
+                    new ChangePasswordRequest(CORRECT_PASSWORD, "MoiHoanToan2027!"), CONTEXT))
+                    .isInstanceOf(AuthenticationFailedException.class);
+
             verify(authEventLogger).failure(eq(AuthEventType.PASSWORD_CHANGE_REJECTED),
-                    eq("bacsi"), eq(staff.getId()), any(), any());
+                    eq("bacsi"), eq(staff.getId()), any(), eq("account locked"));
         }
 
         @Test

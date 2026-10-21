@@ -3,6 +3,7 @@ package com.sclinic.consent;
 import com.sclinic.audit.AuditAction;
 import com.sclinic.audit.AuditDetail;
 import com.sclinic.audit.AuditService;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.common.exception.NotFoundException;
 import com.sclinic.consent.dto.ConsentGrantRequest;
 import com.sclinic.consent.dto.ConsentRecordResponse;
@@ -130,7 +131,7 @@ public class ConsentService {
         Instant grantedAt = request.grantedAt() == null ? now : request.grantedAt();
 
         if (grantedAt.isAfter(now)) {
-            throw new IllegalArgumentException("grantedAt must not be in the future");
+            throw new BadRequestException("grantedAt must not be in the future");
         }
 
         ConsentRecord record = new ConsentRecord();
@@ -283,7 +284,7 @@ public class ConsentService {
         if (type.isSensitive()
                 && (request.sensitivityNotice() == null
                     || request.sensitivityNotice().isBlank())) {
-            throw new IllegalArgumentException(
+            throw new BadRequestException(
                     "Loại đồng ý " + typeCode.name() + " liên quan dữ liệu cá nhân nhạy cảm, "
                             + "nên nội dung phải nêu rõ với bệnh nhân rằng dữ liệu được xử lý "
                             + "là dữ liệu cá nhân nhạy cảm (yêu cầu 11.4, NĐ 13/2023). "

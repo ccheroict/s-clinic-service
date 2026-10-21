@@ -1,6 +1,7 @@
 package com.sclinic.patient;
 
 import com.sclinic.audit.AuditAction;
+import com.sclinic.common.exception.BadRequestException;
 import com.sclinic.audit.AuditService;
 import com.sclinic.access.BreakGlassGrantRepository;
 import com.sclinic.access.PatientAccessGuard;
@@ -275,7 +276,7 @@ class PatientServiceTest {
 
             assertThatThrownBy(() -> service.update(patient.getId(),
                     withDeceasedOn(LocalDate.of(2026, 12, 31))))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("future");
         }
 

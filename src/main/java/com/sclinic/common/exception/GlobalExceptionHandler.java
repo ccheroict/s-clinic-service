@@ -9,6 +9,7 @@ import com.sclinic.allergy.DuplicateAllergyException;
 import com.sclinic.consent.ConsentNotConfiguredException;
 import com.sclinic.consent.ConsentRequiredException;
 import com.sclinic.security.AuthenticationFailedException;
+import com.sclinic.security.SessionExpiredException;
 import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
 import com.sclinic.security.mfa.MfaFailedException;
 import com.sclinic.security.password.WeakPasswordException;
@@ -95,6 +96,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * A token that was real and has run out.
+     *
+     * <p>A 401 like any other authentication failure, but with its own wording
+     * and a machine-readable marker, so a client can send the user back to the
+     * login screen instead of leaving them retyping a correct code at a dead
+     * pending-login token.
+     */
+    @ExceptionHandler(SessionExpiredException.class)
+    public ProblemDetail handleSessionExpired(SessionExpiredException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+        problem.setProperty("reason", "SESSION_EXPIRED");
+        return problem;
+    }
+
+    /**
      * A live allergy record already names this substance.
      *
      * <p>A conflict rather than a validation failure: the request was
@@ -123,12 +140,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Service-layer argument rejections (e.g. staff without the DOCTOR role,
-     * duplicate facility code). These are client mistakes, not server faults,
-     * so they must not surface as 500.
+     * A request the client got wrong, with wording meant for them.
+     *
+     * <p>Only this type reaches here now. {@link IllegalArgumentException} used
+     * to be mapped the same way, which meant any broken internal invariant also
+     * became a 400 carrying its message to the caller: a corrupted TOTP secret
+     * failing to decode would answer "Not a base32 character: ?" with a status
+     * saying the client had done something wrong. It had not, and nothing it
+     * could change would help. Those now fall through to the 500 handler, which
+     * says nothing and logs everything.
      */
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
+    @ExceptionHandler(BadRequestException.class)
+    public ProblemDetail handleBadRequest(BadRequestException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

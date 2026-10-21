@@ -92,6 +92,9 @@ class MfaIntegrationTest {
     @Autowired
     com.sclinic.security.mfa.MfaService mfaService;
 
+    @Autowired
+    org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     /** Returns the admin to the state the seeder left it in. */
     @BeforeEach
     void resetAdminAccount() {
@@ -499,6 +502,161 @@ class MfaIntegrationTest {
         assertThat(admin().getTotpLastStep()).isNull();
     }
 
+    // ---------- reissuing recovery codes (task 1.9c, batch C) ----------
+
+    @Test
+    void theAccountHolderCanReplaceTheirRecoveryCodes() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+
+        // The codes are shown once at enrolment. Reloading that page used to lose
+        // them for good, leaving an administrator clearing the whole second
+        // factor as the only way back — a heavier operation than the problem, and
+        // one that leaves the account with no second factor at all for a while.
+        String body = submitCode("/api/auth/mfa/backup-codes", enrolled.fullToken(),
+                        nextStepCode(enrolled.secret()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode codes = objectMapper.readTree(body).get("backupCodes");
+        assertThat(codes).hasSize(10);
+    }
+
+    @Test
+    void reissuingInvalidatesTheOldRecoveryCodes() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+        String oldCode = enrolled.backupCodes().get(0);
+
+        submitCode("/api/auth/mfa/backup-codes", enrolled.fullToken(),
+                nextStepCode(enrolled.secret()))
+                .andExpect(status().isOk());
+
+        // Otherwise reissuing would add ways past the second factor rather than
+        // replace them, and a set of codes written down and lost would stay live
+        // for ever.
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", pending, oldCode)
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void theNewRecoveryCodesWork() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+
+        String body = submitCode("/api/auth/mfa/backup-codes", enrolled.fullToken(),
+                        nextStepCode(enrolled.secret()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String freshCode = objectMapper.readTree(body).get("backupCodes").get(0).asText();
+
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", pending, freshCode).andExpect(status().isOk());
+    }
+
+    @Test
+    void aFullSessionAloneCannotMintRecoveryCodes() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+
+        // The point of requiring a code. Recovery codes outlive the session that
+        // made them and each one bypasses the second factor, so a stolen session
+        // that could mint them would convert temporary access into permanent
+        // second-factor bypass.
+        submitCode("/api/auth/mfa/backup-codes", enrolled.fullToken(),
+                wrongCode(enrolled.secret()))
+                .andExpect(status().isUnauthorized());
+
+        // And the old codes are untouched by the failed attempt.
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+        submitCode("/api/auth/mfa/verify", pending, enrolled.backupCodes().get(0))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anInterimTokenCannotReissueRecoveryCodes() throws Exception {
+        String enrolToken = login(ADMIN_PASSWORD).get("token").asText();
+
+        // A half-finished login has not proved enough to be handed a set of
+        // permanent bypasses.
+        submitCode("/api/auth/mfa/backup-codes", enrolToken, "123456")
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void reissuingIsRecordedAsItsOwnEvent() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+        // A delta, because auth_event accumulates across the tests in this class
+        // and is not cleared between them.
+        long before = reissueEvents();
+
+        submitCode("/api/auth/mfa/backup-codes", enrolled.fullToken(),
+                nextStepCode(enrolled.secret()))
+                .andExpect(status().isOk());
+
+        // Not folded into MFA_ENROLLED: this hands out fresh ways past the second
+        // factor without the factor changing, and a review asking when an account
+        // last gained a bypass should not have to infer it from an enrolment that
+        // did not happen.
+        assertThat(reissueEvents() - before).isEqualTo(1);
+    }
+
+    private long reissueEvents() {
+        return jdbcTemplate.queryForObject("""
+                select count(*) from auth_event
+                where event_type = 'MFA_BACKUP_CODES_REISSUED' and succeeded = true
+                """, Long.class);
+    }
+
+    // ---------- an expired pending login is not a wrong code ----------
+
+    @Test
+    void anExpiredPendingTokenSaysSoRatherThanBlamingTheCode() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+
+        // The token is revoked rather than aged, which puts it in the same state
+        // the ten-minute expiry would: real, and no longer usable.
+        sessionTokenRepository.findAll().stream()
+                .filter(token -> token.getScope()
+                        == com.sclinic.security.session.TokenScope.MFA_PENDING)
+                .forEach(token -> {
+                    token.setRevokedAt(Instant.now());
+                    sessionTokenRepository.save(token);
+                });
+
+        String body = submitCode("/api/auth/mfa/verify", pending, nextStepCode(enrolled.secret()))
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        // Someone who leaves the code screen open over a break comes back to a
+        // dead token. Telling them the code was invalid sends them to re-read a
+        // code that was never the problem and eventually to decide the
+        // authenticator app is broken.
+        assertThat(objectMapper.readTree(body).get("reason").asText())
+                .isEqualTo("SESSION_EXPIRED");
+    }
+
+    @Test
+    void aGarbageTokenStaysTheUniformFailure() throws Exception {
+        String body = submitCode("/api/auth/mfa/verify", "not-a-real-token", "123456")
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        // Only a token that was actually issued is reported as expired. A value
+        // that never existed says nothing at all.
+        assertThat(body).doesNotContain("SESSION_EXPIRED");
+    }
+
+    @Test
+    void aWrongCodeOnALiveTokenStillBlamesTheCode() throws Exception {
+        Enrolled enrolled = enrolAndRotate();
+        String pending = login(ROTATED_PASSWORD).get("token").asText();
+
+        String body = submitCode("/api/auth/mfa/verify", pending, wrongCode(enrolled.secret()))
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("SESSION_EXPIRED");
+    }
+
     @Test
     void aFullTokenCannotBeUsedToAnswerAChallenge() throws Exception {
         Enrolled enrolled = enrolAndRotate();
@@ -654,3 +812,4 @@ class MfaIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 }
+
