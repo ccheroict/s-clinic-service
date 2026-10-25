@@ -106,7 +106,19 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Thêm `*.tsbuildinfo` vào `.gitignore` của frontend
     - `ChangePasswordPage.vue` giờ có kiểm tra cổng lúc mount như hai màn hình interim còn lại. Trước đó vào trực tiếp thì form vẫn hiện rồi trả "mật khẩu hiện tại không đúng", tức là một cách nói rất khó hiểu cho "bạn chưa đăng nhập"
 
-  - [ ] 1.9c NỢ KỸ THUẬT từ lượt rà soát — cần quyết định hoặc làm ở giai đoạn sau
+  - [x] 1.9c NỢ KỸ THUẬT từ lượt rà soát — **13/15 MỤC XONG 21/10/2026**
+
+    Backend 558 → 637 test xanh, frontend 356 → 403 test xanh. Chi tiết từng lô ở
+    dưới. Hai mục còn lại **chặn bởi quyết định của chủ phòng khám**, không phải
+    chặn bởi công việc:
+    - Xác nhận không môi trường nào có dòng `V3` trong `flyway_schema_history`
+    - Quyết định tách DB role riêng cho ứng dụng (để `REVOKE UPDATE, DELETE ON
+      audit_log` có hiệu lực) — thuộc tầng hạ tầng triển khai
+
+    Trên đường làm còn phát hiện và sửa **3 lỗi không nằm trong danh sách 15 mục**:
+    `GET /api/appointments` vỡ khi thiếu bộ lọc; `pom.xml` thiếu
+    `project.build.sourceEncoding` làm mọi chuỗi tiếng Việt trong Java bị
+    mojibake; lễ tân đọc được dị ứng của bệnh nhân.
 
     - ### ĐIỂM DỪNG 18/10/2026 — đã phân loại 15 mục, chưa viết dòng code nào
       Đã đọc xong code liên quan và chốt cách làm cho từng mục. Hôm sau bắt đầu
