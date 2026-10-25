@@ -1,8 +1,5 @@
 package com.sclinic.signing;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.stereotype.Component;
-
 /**
  * The provider in place when the clinic has not configured one.
  *
@@ -24,8 +21,6 @@ import org.springframework.stereotype.Component;
  * suggest the record had been tampered with; neither is true, and the honest
  * answer is that this installation cannot check.
  */
-@Component
-@ConditionalOnMissingBean(DigitalSignatureProvider.class)
 public class UnconfiguredSignatureProvider implements DigitalSignatureProvider {
 
     static final String PROVIDER_CODE = "NONE";

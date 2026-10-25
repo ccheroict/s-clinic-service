@@ -2,10 +2,8 @@ package com.sclinic.signing;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -37,8 +35,6 @@ import java.util.Map;
  * clinic sets that and supplies credentials,
  * {@link UnconfiguredSignatureProvider} refuses to sign rather than pretending.
  */
-@Component
-@ConditionalOnProperty(name = "sclinic.signing.provider", havingValue = "VNPT_SMARTCA")
 @Slf4j
 public class VnptSmartCaAdapter implements DigitalSignatureProvider {
 

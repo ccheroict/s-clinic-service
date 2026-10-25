@@ -2,6 +2,7 @@ package com.sclinic.encounter;
 
 import com.sclinic.encounter.dto.EncounterRequests;
 import com.sclinic.encounter.dto.EncounterResponse;
+import com.sclinic.encounter.dto.EncounterSignatureStatus;
 import com.sclinic.staff.Staff;
 import com.sclinic.staff.StaffRepository;
 import jakarta.validation.Valid;
@@ -41,6 +42,7 @@ import java.util.UUID;
 public class EncounterController {
 
     private final EncounterService service;
+    private final EncounterSigningService signingService;
     private final StaffRepository staffRepository;
 
     @PostMapping
@@ -97,6 +99,69 @@ public class EncounterController {
                 "version", schema.getVersion(),
                 "title", schema.getTitle(),
                 "schema", schema.getSchema());
+    }
+
+    // ---------- signing, correcting, checking ----------
+
+    /**
+     * Signs the record and locks it. Requirement 14.5.
+     *
+     * <p>Slow by nature: it waits for the doctor to approve on their phone, which
+     * takes as long as it takes them to pick it up. A client must not treat tens
+     * of seconds here as a failure, and must not retry — a second call would ask
+     * for a second approval of a record that is already signed.
+     */
+    @PostMapping("/{id}/sign")
+    public EncounterResponse sign(@PathVariable UUID id, Authentication authentication) {
+        Staff staff = resolveStaff(authentication);
+        return signingService.sign(id, staff.getId(), staff.getRole());
+    }
+
+    /**
+     * Opens a correction to a signed record. Requirement 14.7.
+     *
+     * <p>Returns a new draft that starts as a copy of the original. It has no
+     * effect until it is signed in its own right; until then the original is
+     * still the record in force.
+     */
+    @PostMapping("/{id}/amendments")
+    @ResponseStatus(HttpStatus.CREATED)
+    public EncounterResponse openAmendment(@PathVariable UUID id,
+                                           @Valid @RequestBody AmendmentRequest request,
+                                           Authentication authentication) {
+        Staff staff = resolveStaff(authentication);
+        return signingService.openAmendment(id, request.reason(), staff.getId(),
+                staff.getRole());
+    }
+
+    /**
+     * The original and every correction, oldest first. Requirement 14.8.
+     *
+     * <p>Answers the same way whichever link in the chain is asked about, so a
+     * reader who arrives in the middle still sees the whole history.
+     */
+    @GetMapping("/{id}/chain")
+    public List<EncounterResponse> amendmentChain(@PathVariable UUID id,
+                                                  Authentication authentication) {
+        Staff staff = resolveStaff(authentication);
+        return signingService.amendmentChain(id, staff.getId(), staff.getRole());
+    }
+
+    /** Whether the signature still holds and the record still matches it. */
+    @GetMapping("/{id}/signature")
+    public EncounterSignatureStatus signatureStatus(@PathVariable UUID id,
+                                                    Authentication authentication) {
+        Staff staff = resolveStaff(authentication);
+        return signingService.verifySignature(id, staff.getId(), staff.getRole());
+    }
+
+    /** @param reason why the signed record needs correcting. Must not be blank. */
+    public record AmendmentRequest(
+            @jakarta.validation.constraints.NotBlank(
+                    message = "Đính chính bản ghi đã ký bắt buộc có lý do")
+            @jakarta.validation.constraints.Size(max = 2000)
+            String reason
+    ) {
     }
 
     private Staff resolveStaff(Authentication authentication) {

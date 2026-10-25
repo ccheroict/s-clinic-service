@@ -38,6 +38,16 @@ public enum AuditAction {
     IMPORT,
 
     /**
+     * A record was signed and thereby locked.
+     *
+     * <p>Its own action rather than an UPDATE, because it is the moment a draft
+     * becomes a legal document. A review asking when a record stopped being
+     * editable should find that in one query rather than infer it from a status
+     * field inside some other entry's detail.
+     */
+    SIGN,
+
+    /**
      * Housekeeping removed rows that had outlived their purpose.
      *
      * <p>Distinct from {@link #DELETE}, which is somebody deciding to stop using

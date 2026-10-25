@@ -13,6 +13,7 @@ import com.sclinic.encounter.DuplicateEncounterException;
 import com.sclinic.encounter.EncounterNotEditableException;
 import com.sclinic.security.AuthenticationFailedException;
 import com.sclinic.security.SessionExpiredException;
+import com.sclinic.signing.SignatureFailedException;
 import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
 import com.sclinic.security.mfa.MfaFailedException;
 import com.sclinic.security.password.WeakPasswordException;
@@ -112,6 +113,20 @@ public class GlobalExceptionHandler {
                 ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
         problem.setProperty("reason", "SESSION_EXPIRED");
         return problem;
+    }
+
+    /**
+     * The provider did not sign.
+     *
+     * <p>422 rather than 500: nothing is broken. The signer declined, or did not
+     * reach their phone in time, or the account has no certificate configured —
+     * all of which the caller can act on, and in every case the record is still a
+     * draft and nothing was signed.
+     */
+    @ExceptionHandler(SignatureFailedException.class)
+    public ProblemDetail handleSignatureFailed(SignatureFailedException ex) {
+        return ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
     }
 
     /**
