@@ -42,6 +42,70 @@ public class Staff {
     @Column(nullable = false)
     private boolean active = true;
 
+    // ---------- Columns V1 created and nothing mapped ----------
+    //
+    // These existed in the schema from the first migration and were missing from
+    // this entity, so the application could neither read nor write them. Harmless
+    // while nothing needed them; not harmless now that a signature has to carry
+    // who signed and under what licence, and that the clinic's own staff list
+    // should be able to show a phone number without a direct SQL query.
+
+    /** Relevant for doctors; null for the rest. */
+    @Column(name = "specialty_id")
+    private UUID specialtyId;
+
+    private String phone;
+
+    private String email;
+
+    @Column(name = "created_at", insertable = false, updatable = false)
+    private Instant createdAt;
+
+    // ---------- Credentials to practise and to sign (V17) ----------
+
+    /**
+     * Số giấy phép hành nghề.
+     *
+     * <p>Requirement 14.3. A signed record needs this to be defensible: "signed
+     * by Dr X" means little without the licence that let Dr X sign it.
+     */
+    @Column(name = "practice_licence_no")
+    private String practiceLicenceNo;
+
+    /**
+     * Mã liên thông of the doctor in the national system.
+     *
+     * <p>Separate from the licence number because they are issued by different
+     * bodies and a doctor may hold one before the other.
+     */
+    @Column(name = "national_doctor_code")
+    private String nationalDoctorCode;
+
+    /**
+     * Phạm vi hành nghề, as worded on the licence.
+     *
+     * <p>Text rather than a code list: the wording on a Vietnamese licence is not
+     * drawn from a closed vocabulary, and flattening it into categories would
+     * lose the part a reviewer would actually want to read.
+     */
+    @Column(name = "practice_scope")
+    private String practiceScope;
+
+    /**
+     * Handle for this person's signing key at the remote provider.
+     *
+     * <p>Never the key itself. Remote signing exists so the private key stays
+     * with the provider and the signer approves each use on their own device; if
+     * this field ever held key material, the arrangement would have lost the
+     * property that makes it worth having.
+     */
+    @Column(name = "signing_credential_id")
+    private String signingCredentialId;
+
+    /** Which provider that credential belongs to. */
+    @Column(name = "signing_provider")
+    private String signingProvider;
+
     // ---------- Account protection state (V5) ----------
 
     @Column(name = "password_changed_at")

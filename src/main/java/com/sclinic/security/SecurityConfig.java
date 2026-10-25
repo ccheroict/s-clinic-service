@@ -43,7 +43,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
         com.sclinic.audit.AuditChainProperties.class,
         com.sclinic.security.authevent.ForwardedHeaderProperties.class,
         com.sclinic.maintenance.MaintenanceProperties.class,
-        com.sclinic.encounter.EncounterProperties.class})
+        com.sclinic.encounter.EncounterProperties.class,
+        com.sclinic.signing.SigningProperties.class})
 @RequiredArgsConstructor
 public class SecurityConfig {
 
