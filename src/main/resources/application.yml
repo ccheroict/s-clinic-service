@@ -108,6 +108,25 @@ sclinic:
     # sent the request.
     trusted-proxy-count: ${NETWORK_TRUSTED_PROXY_COUNT:0}
 
+  maintenance:
+    # Nightly housekeeping for the authentication tables. Both of these are
+    # UNSET on purpose, and unset means keep everything.
+    #
+    # Expired session rows: audit_log.session_id points at them, so deleting one
+    # makes every audit entry written during that session unable to say which
+    # device and address it came from. The entry survives; its context does not.
+    # Medical audit trails are kept for years, so set this well beyond the audit
+    # retention if you set it at all.
+    #
+    # Authentication events: this table is the record of who tried to log in and
+    # when. Trimming it erases evidence, and evidence is usually wanted long
+    # after the point where anyone thought to ask for it. The number has to come
+    # from the clinic with a reason attached, like the clinical retention policy.
+    #
+    # Example, if the clinic has decided: PT8760H is one year.
+    session-token-retention: ${MAINTENANCE_SESSION_TOKEN_RETENTION:}
+    auth-event-retention: ${MAINTENANCE_AUTH_EVENT_RETENTION:}
+
   bootstrap:
     admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
     # Leave empty to generate a random password, printed to the log once on first

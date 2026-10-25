@@ -35,5 +35,18 @@ public enum AuditAction {
      * are what tell a later review whether a given import changed existing
      * entries or only added new ones.
      */
-    IMPORT
+    IMPORT,
+
+    /**
+     * Housekeeping removed rows that had outlived their purpose.
+     *
+     * <p>Distinct from {@link #DELETE}, which is somebody deciding to stop using
+     * one record. This is a scheduled job trimming a table, and the two must not
+     * read alike: a review looking for who discarded a patient's record should
+     * not have to sift nightly maintenance out of the results.
+     *
+     * <p>Audited at all because a purge that leaves no trace cannot be told apart
+     * from tampering, and these purges remove rows that security reviews read.
+     */
+    PURGE
 }

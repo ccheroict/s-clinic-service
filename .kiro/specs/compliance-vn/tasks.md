@@ -820,21 +820,71 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
       `MfaVerifyPage` đưa người dùng về `/login` khi token hết hạn thay vì giữ họ
       lại gõ mã.
 
-      **CÒN LẠI CỦA LÔ C — làm tiếp hôm sau:**
-      - [ ] Frontend: UI cấp lại mã dự phòng, gọi `POST /api/auth/mfa/backup-codes`
-        (backend đã sẵn sàng, cần nhập mã TOTP). Chỗ đặt hợp lý: màn hình hồ sơ
-        cá nhân của nhân viên, hoặc một đường dẫn từ màn hình hiện mã dự phòng
-      - [ ] Frontend: cho phiên FULL chưa có yếu tố thứ hai tự bật MFA.
-        **Backend ĐÃ cho phép** (`beginMfaEnrolment` nhận cả `FULL`); chặn nằm ở
-        `MfaEnrollPage` yêu cầu scope `ENROLL_MFA`. Ảnh hưởng RECEPTIONIST muốn
-        tự nguyện bật. Giữ nguyên quyết định cũ: `beginEnrolment` vẫn trả 409 khi
-        ĐÃ có yếu tố đã xác nhận
-      - [ ] Viết test frontend cho hai mục trên
+      **✅ HAI MỤC CUỐI CỦA LÔ C ĐÃ XONG 21/10/2026.** Frontend 393 → 403 test xanh.
+
+      - **Cho phiên FULL tự bật MFA.** `authStore.canSetUpMfa` =
+        `mfaEnrolmentRequired || isAuthenticated`. Backend vốn đã nhận token
+        `FULL`, nên thứ duy nhất chặn lại là chính màn hình này — mà luồng đăng
+        nhập thì KHÔNG BAO GIỜ đưa lễ tân tới đây vì vai trò của họ không bắt
+        buộc MFA. Kết quả: **nhóm có khả năng tự nguyện bật nhất lại là nhóm
+        không bật được.** Đã thêm cả hai màn hình vào menu điều hướng
+      - Trang KHÔNG hỏi xem tài khoản đã có yếu tố thứ hai chưa, vì server không
+        trả lời và cũng không cần: đăng ký trả 409 nếu đã có. Người vào tự nguyện
+        rồi đổi ý thì được trả về app, KHÔNG bị đăng xuất như nút cũ vẫn làm
+      - **Trang cấp lại mã dự phòng** `/mfa/recovery-codes`, BẮT BUỘC nhập mã
+        TOTP hiện tại. Mã sai và tài khoản chưa bật MFA báo GIỐNG NHAU có chủ ý:
+        cả hai đều 401, mã sai đếm vào lockout, nên chỗ này không được thành nơi
+        phân biệt mã đúng với mã sai
+      - **Thêm biến thể `ApiConflict` cho 409, giữ nguyên nội dung từ server.**
+        Mọi 409 của backend này đều là một câu viết cho người dùng đọc (tài khoản
+        đã có yếu tố thứ hai, dị ứng này đã có bản ghi còn hiệu lực) và mỗi câu
+        nói rõ phải làm gì khác đi. Trước đó chúng rơi xuống catch-all và đến tay
+        người dùng thành "An error occurred. Please try again later." — vừa sai về
+        việc lỗi của ai, vừa vô dụng về việc phải làm gì. Một test property cũ
+        liệt kê 409 vào nhóm "mã chưa định nghĩa"; đã sửa thành chốt hành vi mới
 
     - ### CÒN LẠI SAU LÔ C
-      - [ ] **Lô D — dọn dẹp:** job xoá `session_token` hết hạn
-        (`deleteExpiredBefore` đã có, chưa ai gọi), `auth_event`,
-        `staff_password_history`
+      - [x] **Lô D — dọn dẹp. XONG 21/10/2026.** Backend 618 → 635 test xanh.
+        `maintenance/{MaintenanceProperties, SecurityHousekeepingService,
+        SecurityHousekeepingJob}`, chạy 03:15 giờ VN. `+AuditAction.PURGE`,
+        `+AuthEventRepository.deleteCreatedBefore`, `@EnableScheduling`.
+
+        **PHÁT HIỆN QUAN TRỌNG định hình cả lô này: `audit_log.session_id` TRỎ
+        VÀO chính bảng `session_token`.** Xoá một dòng session là làm cho mọi
+        dòng audit ghi trong phiên đó mất khả năng nói nó đến từ thiết bị nào,
+        địa chỉ nào — dòng audit còn, ngữ cảnh của nó thì không. Mà hồ sơ audit
+        y tế phải giữ nhiều năm. Nên "job dọn dẹp" ở đây KHÔNG phải là xoá cho
+        gọn; câu trả lời đúng phần lớn là **đừng xoá**.
+
+        **Thiết kế ba mức, theo đúng nguyên tắc `retention_policy`:**
+        - `staff_password_history`: **LUÔN dọn**, theo SỐ LƯỢNG chứ không theo
+          tuổi. `passwordHistorySize` đã nói giữ bao nhiêu mật khẩu cũ là đủ để
+          chặn tái sử dụng, nên các dòng quá vị trí đó không ảnh hưởng được quyết
+          định nào. **Không phải bịa ra con số nào cả.** Giữ lại chúng là giữ
+          hash bcrypt mật khẩu cũ của nhân viên mà chẳng để làm gì
+        - `session_token`: chỉ xoá khi operator CẤU HÌNH thời hạn. Mặc định
+          KHÔNG đặt = giữ hết. Ai đặt là đang chấp nhận đánh đổi nói trên, và nên
+          đặt CAO HƠN thời hạn lưu audit chứ không thấp hơn
+        - `auth_event`: cũng chỉ xoá khi cấu hình. Bảng này CHÍNH LÀ hồ sơ ai đã
+          thử đăng nhập và khi nào; một job tự động cắt nó là một job xoá chứng
+          cứ theo lịch mà không ai chọn, mà chứng cứ thì thường được cần đến rất
+          lâu sau thời điểm có người nghĩ tới việc hỏi
+        - Cắt theo `expires_at` chứ không theo lúc tạo, nên thời hạn dù ngắn đến
+          đâu cũng KHÔNG BAO GIỜ chạm tới phiên người ta đang dùng
+        - Mỗi lượt chạy có xoá gì đều ghi audit `PURGE` kèm SỐ ĐẾM — purge không
+          để lại dấu thì không phân biệt được với can thiệp, mà purge này xoá
+          đúng những dòng mà rà soát an ninh đọc. `PURGE` tách khỏi `DELETE`: rà
+          soát tìm "ai đã ngừng dùng hồ sơ bệnh nhân" không phải lọc bỏ bảo trì
+          hằng đêm ra khỏi kết quả. Lượt chạy không xoá gì thì KHÔNG ghi audit
+        - `detail` chỉ có số đếm, KHÔNG nêu tài khoản nào: nêu tên là sao mẫu
+          hoạt động của nhân viên sang một bảng thứ hai sống lâu hơn chính dòng
+          nó mô tả
+        - Job bắt lỗi và ghi log chứ không ném lên: một lượt dọn thất bại không
+          được làm scheduler bỏ luôn ngày mai
+        - **Giả định MỘT instance**, đã ghi rõ trong javadoc của job. Nếu sau này
+          chạy hai instance thì cả hai đều chạy và đua trên cùng các dòng — vô
+          hại với delete (idempotent) nhưng sẽ đếm đôi trong dòng audit. Cần lock
+          TRƯỚC khi có instance thứ hai
       - [ ] **ĐO tải lên `audit_chain_head`** như Lô B đã hẹn. Danh sách bệnh
         nhân là trang hay mở nhất và giờ mỗi lượt liệt kê của lễ tân/admin đều
         ghi một dòng audit, tức đều xếp hàng trên một dòng duy nhất. Cần đo trước
