@@ -885,9 +885,32 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
           chạy hai instance thì cả hai đều chạy và đua trên cùng các dòng — vô
           hại với delete (idempotent) nhưng sẽ đếm đôi trong dòng audit. Cần lock
           TRƯỚC khi có instance thứ hai
-      - [ ] **ĐO tải lên `audit_chain_head`** như Lô B đã hẹn. Danh sách bệnh
-        nhân là trang hay mở nhất và giờ mỗi lượt liệt kê của lễ tân/admin đều
-        ghi một dòng audit, tức đều xếp hàng trên một dòng duy nhất. Cần đo trước
-        khi lên production
+      - [x] **ĐÃ ĐO tải lên `audit_chain_head` — 21/10/2026. KẾT LUẬN: KHÔNG CẦN
+        LÀM GÌ.** `AuditChainContentionTest` (DB `audit_contention_it`).
+
+        **Số đo: 200 lượt ghi từ 8 luồng trong 579 ms = 345 lượt ghi/giây,
+        2,9 ms mỗi lượt**, trên embedded Postgres chạy máy laptop. Dạng ghi dùng
+        để đo đúng là dạng Lô B thêm vào: `VIEW` không có `entity_id`, kèm map
+        `detail` nhỏ.
+
+        Đối chiếu quy mô: một phòng khám da liễu phát sinh cỡ vài nghìn lượt
+        thao tác có audit mỗi ngày. 345 lượt/giây dù đã xếp hàng tuần tự là
+        khoảng 1,2 triệu lượt/giờ. Tức **điểm nghẽn lý thuyết này cách quy mô
+        thật ba bậc độ lớn** — mối lo là có cơ sở về mặt thiết kế nhưng không có
+        hệ quả thực tế, và tối ưu nó lúc này là tối ưu vào chỗ không ai chờ.
+        Quyết định cũ ("chỉ xử lý nếu đo thấy thành vấn đề") giữ nguyên, giờ đã
+        có số để đứng sau nó.
+
+        Test khẳng định tính ĐÚNG (mọi dòng đều tới, chuỗi vẫn verify được,
+        `entry_count` khớp, `prev_hash` không bị trùng — tức chuỗi không phân
+        nhánh) và chỉ GHI LOG thông lượng, không assert, để một lượt chạy trên
+        máy yếu không làm đỏ build. Có một assert thời gian duy nhất là ngưỡng
+        trần 60 giây — để việc lock dòng head suy biến thành timeout thì build
+        đỏ, chứ không phải để canh từng milisecond.
+
+        Thêm một test riêng cho việc KHÔNG deadlock. Lập luận "lock chỉ lấy trên
+        một bảng và transaction audit không chạm dòng nghiệp vụ nào" vốn chỉ nằm
+        trong comment của `AuditService`, mà comment thì không đỏ khi có người
+        thêm bảng thứ hai vào transaction đó.
       - [ ] **CHẶN BỞI USER:** xác nhận không môi trường nào có dòng `V3` trong
         `flyway_schema_history`; quyết định tách DB role cho ứng dụng
