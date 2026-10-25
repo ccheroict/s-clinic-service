@@ -720,7 +720,99 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Map đủ các cột `Staff` hiện đang thiếu trong entity (`specialty_id`, `phone`, `email`, `created_at`)
     - _Requirements: 14.1, 14.2, 14.3, 14.4_
 
-  - [ ] 3.5 Ký, khóa và đính chính (DỪNG CHỜ VĂN BẢN TT 13/2025 + CV 365)
+  - [~] 3.5 Ký, khóa và đính chính — **PHẦN KHÔNG PHỤ THUỘC VĂN BẢN ĐÃ XONG
+    25/10/2026**, `V18__encounter_immutable.sql`. Backend 678 → 720 test xanh
+    (gồm cả 3.6).
+
+    **VẪN CHỜ TT 13/2025 + CV 365/TTYQG — CỐ TÌNH ĐỂ TRỐNG, KHÔNG ĐOÁN:**
+    - Ai được phép đính chính bản ghi của người khác
+    - Đính chính có giới hạn thời gian không
+    - Văn bản có quy định dạng biểu mẫu bắt buộc không
+
+    Một quy tắc đoán bừa ở chỗ này trông như có căn cứ và lại quyết định việc một
+    bản đính chính có hiệu lực pháp lý hay không. Nên tôi làm đúng phần mà yêu cầu
+    14.6–14.8 đã nói rõ, phần còn lại để trống.
+
+    **`EncounterCanonicalForm` — quyết định chính xác những byte nào được ký.**
+    Đây là chỗ không tha thứ nhất, vì output của nó phải tái lập được suốt thời
+    gian lưu hồ sơ: công thức lệch một ký tự là MỌI chữ ký ngừng verify được, mà
+    lỗi đó trông y hệt như hồ sơ bị can thiệp.
+    - **Tiền tố độ dài** như chuỗi audit, nên nội dung trường không thể giả làm
+      biên giữa các trường. Với dấu phân tách, `reason="a|b"` + không có advice và
+      `reason="a"` + `advice="b"` sẽ hash GIỐNG NHAU, tức viết lại cái này thành
+      cái kia mà chữ ký vẫn đúng
+    - **`status` KHÔNG nằm trong hash — quyết định quan trọng nhất ở đây.** Trạng
+      thái bản gốc chuyển sang AMENDED khi một đính chính được ký; nếu hash nó thì
+      việc đính chính ĐÚNG CÁCH sẽ phá vỡ chữ ký của chính bản gốc, và bản ghi sẽ
+      trông như bị can thiệp bởi chính hành động làm đúng. Có test chốt điều này
+    - `updated_at` và các cột xoá mềm / lưu trữ cũng ngoài hash: nghiệp vụ lưu trữ
+      không nói gì về điều bác sĩ đã thấy. Hash chúng là làm việc của người làm
+      lưu trữ trông như sửa nội dung lâm sàng
+    - **Clinical data canonical hoá với khoá ĐÃ SẮP XẾP**, vì cột `jsonb` không
+      hứa trả về khoá theo thứ tự đã ghi. Số đi qua `BigDecimal` vì Jackson có thể
+      trả `6` hoặc `6.0` cho cùng một giá trị đã lưu. Thiếu một trong hai là bản
+      ghi tự fail verify chính chữ ký của nó mà không có lý do gì. List GIỮ thứ tự
+      vì thứ tự bác sĩ nhập là dữ liệu
+    - Chẩn đoán nằm TRONG hash, sắp theo mã (thứ tự dòng mà DB trả về không cố
+      định)
+
+    **V18 khoá bản ghi đã ký Ở TẦNG DATABASE** — nửa quan trọng của yêu cầu 14.6:
+    kiểm tra ở service chỉ bảo vệ những caller đi qua service, mà hồ sơ bệnh án
+    phải sống sót qua những caller KHÔNG đi qua đó — một migration viết vội, một
+    script sửa dữ liệu, một ORM flush entity cũ, hay một ứng dụng thứ hai viết dựa
+    trên cùng database 5 năm sau.
+    - **Bảng chẩn đoán có trigger RIÊNG.** Khoá mỗi bảng `encounter` sẽ để ngỏ
+      phần đáng sửa nhất của hồ sơ, ở một bảng khác
+    - Trigger liệt kê TỪNG CỘT thay vì so cả dòng: so cả dòng sẽ bắt luôn các cột
+      lifecycle, và một cột thêm vào sau này nên làm trigger này đỏ lên thay vì âm
+      thầm sửa được
+    - **Cột lifecycle VẪN ghi được** (xoá mềm, retention, legal hold): bất biến ở
+      đây là về nội dung lâm sàng, không phải về việc hồ sơ không thể ngừng dùng.
+      Đóng băng cả chúng sẽ làm bản ghi đã ký không bao giờ lưu trữ được
+    - Xoá cứng bản ghi đã ký bị từ chối: tiêu hủy là quyết định của chính sách lưu
+      trữ, thể hiện bằng xoá mềm + ngày, không phải bằng câu DELETE
+    - Chuyển trạng thái tuỳ ý bị từ chối; chỉ cho SIGNED → AMENDED
+
+    **Đính chính** là bản nháp MỚI, bắt đầu như một bản copy của bản gốc, và chỉ
+    có hiệu lực khi được ký riêng. Trước đó bản gốc vẫn là bản đang áp dụng. Chuỗi
+    đọc từ bản gốc dù sâu bao nhiêu và dù hỏi từ mắt nào — một lịch sử đọc khác
+    nhau tuỳ chỗ bước vào thì còn tệ hơn không có lịch sử.
+
+    **Đúng một chẩn đoán chính ép lúc KÝ**, không ép lúc insert, và ký cũng từ
+    chối bác sĩ chưa có số giấy phép hành nghề (yêu cầu 14.3).
+
+    **LỖI TÔI GÂY RA Ở COMMIT TRƯỚC, ĐÃ SỬA:**
+    `UnconfiguredSignatureProvider` dùng `@ConditionalOnMissingBean` trên một
+    `@Component` được scan — annotation đó dành cho `@Bean` trong
+    auto-configuration, nơi thứ tự đánh giá được định nghĩa. Trên component thì nó
+    chỉ đơn giản LOẠI bean đó ra, để lại ứng dụng không có provider nào và context
+    không khởi động được. Thay bằng lựa chọn tường minh trong `SigningConfig`: dài
+    hơn ba dòng và nói đúng điều xảy ra. Tên provider không khớp gì giờ **fail ở
+    startup** thay vì âm thầm rơi về bản từ chối ký — phòng khám đã cấu hình
+    provider thì họ tin là mình có một cái.
+    - _Requirements: 14.5, 14.6, 14.7, 14.8, 14.9_
+
+  - [x] 3.6 Viết property test cho tính bất biến — **XONG 25/10/2026**
+    - `EncounterImmutabilityPropertyTest` (10 test) +
+      `EncounterSigningIntegrationTest` (32 test, DB `encounter_sign_it`)
+    - **Property 1:** không một thay đổi nội dung nào để lại hash như cũ — 21 phép
+      sửa cho encounter, 6 phép cho chẩn đoán. Phải đúng với MỌI trường chứ không
+      chỉ trường ai đó nghĩ tới: một trường bị bỏ sót khỏi canonical form là một
+      trường sửa được âm thầm, mà lỗ hổng đó VÔ HÌNH vì chữ ký vẫn verify
+    - **Property 2 (nửa đối xứng, dễ bị quên):** thay đổi những thứ CỐ TÌNH không
+      phải nội dung thì KHÔNG được đổi hash. Ngừng dùng bản ghi, tính lại ngày lưu
+      trữ, hay đánh dấu AMENDED đều là nghiệp vụ; nếu một trong số đó đổi hash thì
+      làm đúng lại khiến bản ghi trông như bị can thiệp
+    - Có test chốt: trường RỖNG khác trường VẮNG ("không ghi lời dặn" và "ghi lời
+      dặn là không có gì" là hai phát biểu khác nhau trong hồ sơ bệnh án), và nội
+      dung trường không giả được biên trường
+    - Nửa database của 14.6 (trigger thật sự từ chối) nằm ở
+      `EncounterSigningIntegrationTest`, có cả test TẮT trigger rồi sửa để chứng
+      minh verification bắt được — tức verification là lớp chặn CUỐI sau khoá, chứ
+      không phải thay cho khoá
+    - **Validates: Requirements 14.6, 14.7, 14.8**
+
+  - [ ] ~~3.5 Ký, khóa và đính chính (DỪNG CHỜ VĂN BẢN TT 13/2025 + CV 365)~~
     - Yêu cầu chủ phòng khám cung cấp quy tắc đính chính trước khi thiết kế
     - Ký chuyển DRAFT sang SIGNED
     - Chặn UPDATE ở tầng service và bằng DB trigger khi trạng thái khác DRAFT
