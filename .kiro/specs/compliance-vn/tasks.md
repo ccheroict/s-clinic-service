@@ -651,7 +651,67 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     - Integration test: tạo encounter từ appointment chuyển trạng thái đúng
     - **Validates: Requirements 13.2, 13.4, 13.5, 13.6**
 
-  - [ ] 3.4 Port ký số và adapter VNPT SmartCA
+  - [x] 3.4 Port ký số và adapter VNPT SmartCA — **XONG 25/10/2026**,
+    `V17__signature.sql`. Backend 670 → 678 test xanh.
+
+    **CẦN CHỦ PHÒNG KHÁM CUNG CẤP:** tài liệu tích hợp API của VNPT SmartCA.
+    Tài liệu đó chỉ phát cho khách hàng đã ký hợp đồng, không công khai. Phần
+    đường dẫn endpoint, tên trường và cơ chế xác thực trong `VnptSmartCaAdapter`
+    hiện **dựng theo chuẩn Cloud Signature Consortium** (chuẩn châu Âu mà VNPT mô
+    tả SmartCA tuân theo) và theo hình dạng chung của loại dịch vụ này — nên đó
+    là phần dễ sai nhất. Đã **dồn hết vào mấy hằng số và ba method private** để
+    khi có tài liệu thật thì sửa không chạm vào chỗ nào khác.
+
+    Những phần KHÔNG tạm bợ, vì suy ra từ yêu cầu 14 chứ không từ nhà cung cấp:
+    cổng ký, bảng `signature`, cái gì được hash, và khi nào bản ghi thành SIGNED.
+
+    - **Chứng thư lưu THEO TỪNG CHỮ KÝ**, không tra từ người ký. Chứng thư được
+      gia hạn và hết hạn; một chữ ký tạo dưới chứng thư nay đã hết hạn VẪN là chữ
+      ký hợp lệ tạo ra lúc chứng thư còn tốt — mà chứng minh được điều đó thì phải
+      giữ đúng chứng thư đã dùng. Trỏ vào chứng thư hiện tại của người ký sẽ làm
+      MỌI chữ ký lịch sử mất khả năng kiểm tra ngay lần gia hạn đầu tiên
+    - **Kiểm tra chữ ký LÀM CỤC BỘ, không gọi ai.** Chữ ký, chứng thư và hash đều
+      nằm trên dòng nên kiểm tra là phép tính. Đây là CHỦ ĐÍCH chứ không phải tối
+      ưu: bản ghi ký 5 năm trước phải còn kiểm được sau khi phòng khám đổi nhà
+      cung cấp, sau khi nhà cung cấp bị mua lại, và sau khi họ không còn nhấc máy
+      — một phép kiểm tra phụ thuộc bên thứ ba còn sống là phép kiểm tra sẽ vỡ
+      đúng lúc bản ghi bị chất vấn
+    - **Yêu cầu 14.9 trả về HAI kết luận, không phải một boolean.** Bản ghi bị sửa
+      và chữ ký bị vỡ là hai chuyện trái ngược với hai người chịu trách nhiệm khác
+      nhau; gộp lại sẽ hiện "tài liệu bị can thiệp" và "chứng thư hết hạn" thành
+      cùng một dấu đỏ, mà chỉ một trong hai là sự cố. So hash chạy TRƯỚC và báo
+      riêng
+    - **Chỉ HASH đi tới nhà cung cấp, không bao giờ là bản ghi.** Một digest là đủ
+      cho chữ ký, còn gửi kết quả khám của bệnh nhân sang bên thứ ba chỉ để ký thì
+      không phải cái giá đáng đổi. Chữ hiện trên điện thoại người ký KHÔNG được
+      nêu tên bệnh nhân — thông báo đẩy đọc trên màn hình khoá, thường ở chỗ đông
+      người
+    - **Chưa cấu hình nhà cung cấp thì `UnconfiguredSignatureProvider` TỪ CHỐI ký
+      và nói rõ vì sao**, để phòng khám đang lắp đặt vẫn tiếp nhận bệnh nhân và
+      ghi bản nháp trước khi chứng thư về. Nó **CỐ TÌNH không ký bằng khoá lưu
+      trên máy chủ**: làm vậy sẽ thoả mọi test, đánh dấu bản ghi là SIGNED, sinh
+      ra chữ ký hợp lệ về mặt kỹ thuật và KHÔNG CÓ giá trị pháp lý nào — mà không
+      ai phát hiện ra cho tới khi một bản ghi bị chất vấn. Lớp sinh chứng thư cho
+      test nằm trong test sources vì đúng lý do đó
+    - Kiểm tra chưa cấu hình trả về "không kiểm tra được", KHÔNG trả về "không hợp
+      lệ": trả hợp lệ là nói dối, còn trả không hợp lệ là gợi ý bản ghi bị can
+      thiệp — cả hai đều không đúng
+    - Bảng `signature` **append-only bằng trigger** như `audit_log`, cùng lập
+      luận: chữ ký thay được thì không chứng minh được gì
+    - `VnptSmartCaAdapter` dùng **polling, không callback**: callback cần một
+      endpoint để nhà cung cấp gọi vào, tức mở một cổng ra Internet từ trong mạng
+      phòng khám — quyết định lớn hơn mức mà tính năng này nên tự quyết thay phòng
+      khám. Polling tốn một request bị giữ trong lúc bác sĩ tìm điện thoại, với
+      vài chữ ký một ngày thì chấp nhận được
+    - Adapter **fail ở startup** nếu chọn VNPT_SMARTCA mà thiếu `base-url` /
+      `client-id` / `client-secret`: phát hiện lúc bác sĩ ký bản ghi đầu tiên là
+      phát hiện ngay trước mặt bệnh nhân
+    - **V17 map luôn 4 cột V1 tạo mà chưa entity nào đọc:** `specialty_id`,
+      `phone`, `email`, `created_at`. Vô hại khi chưa ai cần; không còn vô hại khi
+      chữ ký phải mang theo ai ký và dưới giấy phép nào
+    - _Requirements: 14.1, 14.2, 14.3, 14.4_
+
+  - [ ] ~~3.4 Port ký số và adapter VNPT SmartCA~~
     - Tạo interface `DigitalSignatureProvider` với `sign`, `verify`, `providerCode`
     - Tạo `VnptSmartCaAdapter` gọi API ký từ xa, hỗ trợ chờ người dùng xác nhận trên điện thoại
     - Chọn adapter theo cấu hình `sclinic.signing.provider`
