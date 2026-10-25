@@ -8,6 +8,9 @@ import com.sclinic.access.PatientAccessDeniedException;
 import com.sclinic.allergy.DuplicateAllergyException;
 import com.sclinic.consent.ConsentNotConfiguredException;
 import com.sclinic.consent.ConsentRequiredException;
+import com.sclinic.encounter.ClinicalDataInvalidException;
+import com.sclinic.encounter.DuplicateEncounterException;
+import com.sclinic.encounter.EncounterNotEditableException;
 import com.sclinic.security.AuthenticationFailedException;
 import com.sclinic.security.SessionExpiredException;
 import com.sclinic.security.mfa.MfaAlreadyEnrolledException;
@@ -108,6 +111,53 @@ public class GlobalExceptionHandler {
         ProblemDetail problem =
                 ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
         problem.setProperty("reason", "SESSION_EXPIRED");
+        return problem;
+    }
+
+    /**
+     * The clinical data did not match its schema.
+     *
+     * <p>Carries the whole list of failures, not the first. A clinician fixing a
+     * form one submission at a time is a clinician who decides the form is broken
+     * and writes the finding into free text instead, which is the outcome
+     * structured clinical data exists to avoid.
+     */
+    @ExceptionHandler(ClinicalDataInvalidException.class)
+    public ProblemDetail handleClinicalDataInvalid(ClinicalDataInvalidException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+
+        problem.setProperty("schemaVersion", ex.getSchemaVersion());
+        problem.setProperty("failures", ex.getFailures());
+        return problem;
+    }
+
+    /**
+     * An attempt to change a record that has been signed.
+     *
+     * <p>409 rather than 403: the caller may be exactly the person entitled to
+     * correct it. What they cannot do is overwrite what was signed, and the
+     * message names the amendment path instead — otherwise a clinician concludes
+     * the system lost their correction.
+     */
+    @ExceptionHandler(EncounterNotEditableException.class)
+    public ProblemDetail handleEncounterNotEditable(EncounterNotEditableException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * An encounter already exists for this appointment.
+     *
+     * <p>Carries the existing record's id, so a client that double-submitted can
+     * open the record it already created rather than being told only that
+     * something was wrong.
+     */
+    @ExceptionHandler(DuplicateEncounterException.class)
+    public ProblemDetail handleDuplicateEncounter(DuplicateEncounterException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+
+        problem.setProperty("existingEncounterId", ex.getExistingEncounterId());
         return problem;
     }
 

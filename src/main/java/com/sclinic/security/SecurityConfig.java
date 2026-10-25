@@ -42,7 +42,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
         com.sclinic.access.AccessProperties.class,
         com.sclinic.audit.AuditChainProperties.class,
         com.sclinic.security.authevent.ForwardedHeaderProperties.class,
-        com.sclinic.maintenance.MaintenanceProperties.class})
+        com.sclinic.maintenance.MaintenanceProperties.class,
+        com.sclinic.encounter.EncounterProperties.class})
 @RequiredArgsConstructor
 public class SecurityConfig {
 

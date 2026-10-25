@@ -111,9 +111,13 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
     Backend 558 → 637 test xanh, frontend 356 → 403 test xanh. Chi tiết từng lô ở
     dưới. Hai mục còn lại **chặn bởi quyết định của chủ phòng khám**, không phải
     chặn bởi công việc:
-    - Xác nhận không môi trường nào có dòng `V3` trong `flyway_schema_history`
+    - ~~Xác nhận không môi trường nào có dòng `V3` trong
+      `flyway_schema_history`~~ — **CHỦ PHÒNG KHÁM XÁC NHẬN 25/10/2026: hệ thống
+      chưa được triển khai ở bất cứ đâu.** Nên không có `flyway_schema_history`
+      nào tồn tại, bản sửa `V3` tại chỗ là an toàn, và không cần chuyển thành
+      migration mới. Mục này ĐÓNG
     - Quyết định tách DB role riêng cho ứng dụng (để `REVOKE UPDATE, DELETE ON
-      audit_log` có hiệu lực) — thuộc tầng hạ tầng triển khai
+      audit_log` có hiệu lực) — thuộc tầng hạ tầng triển khai, vẫn mở
 
     Trên đường làm còn phát hiện và sửa **3 lỗi không nằm trong danh sách 15 mục**:
     `GET /api/appointments` vỡ khi thiếu bộ lọc; `pom.xml` thiếu

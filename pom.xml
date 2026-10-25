@@ -38,6 +38,18 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <mapstruct.version>1.5.5.Final</mapstruct.version>
+
+        <!--
+            JSON Schema validation for the specialty-specific part of an
+            encounter. Pinned exactly, like every other version here.
+
+            The 1.5.x line rather than 3.x: the 3.x release notes describe
+            incompatible API changes, and this project is on Spring Boot 3.2 with
+            the Jackson version that brings. Clinical data validation is not the
+            place to be chasing a major version for its own sake, and 1.5.x
+            supports Draft 2020-12, which is what the schemas are written to.
+        -->
+        <json.schema.validator.version>1.5.8</json.schema.validator.version>
         <embedded.postgres.version>2.0.7</embedded.postgres.version>
         <embedded.postgres.binaries.version>16.2.0</embedded.postgres.binaries.version>
     </properties>
@@ -99,6 +111,12 @@
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
             <version>${mapstruct.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>${json.schema.validator.version}</version>
         </dependency>
 
         <!-- Test -->
