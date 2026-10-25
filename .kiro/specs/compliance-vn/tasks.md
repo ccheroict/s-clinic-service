@@ -544,7 +544,94 @@ Triển khai 31 task qua 7 giai đoạn để đưa s-clinic lên mức tuân th
 
 - [ ] 3. Giai đoạn 2: Hồ sơ bệnh án điện tử
 
-  - [ ] 3.1 Bản ghi khám cơ bản
+  - [x] 3.1 Bản ghi khám cơ bản — **XONG 25/10/2026**, `V16__encounter.sql`.
+    Backend 637 → 670 test xanh (gồm cả 3.2 và 3.3).
+
+    **PHÁT HIỆN: V1 ĐÃ CÓ bảng `encounter`** — một lượt khám với cột `diagnosis`
+    là VĂN BẢN TỰ DO và `clinical_data` jsonb không có schema. Đúng là bản nháp
+    hợp lý, nhưng không phải hồ sơ bệnh án. Nên V16 là ALTER chứ không CREATE.
+    - **Bỏ cột `diagnosis` văn bản tự do.** Nó đúng cái bẫy của cột `allergies`:
+      văn xuôi trông như thông tin đã ghi nhận mà mọi thứ cần đọc nó đều không
+      đọc được. `encounter_diagnosis` thay thế bằng chẩn đoán CÓ MÃ tham chiếu
+      danh mục ICD-10
+    - **Bỏ thẳng, không chuyển thành ghi chú cũ như V13 làm với dị ứng** — và lý
+      do duy nhất khiến điều đó chấp nhận được là **chủ phòng khám xác nhận hệ
+      thống chưa deploy ở đâu**. Có một dòng dữ liệu thật thôi là phải chuyển
+      sang và đánh dấu cần rà soát, vì chẩn đoán không phải thứ để parse tự động
+    - Đổi tên `encounter_date` → `encountered_at` (tên nói "date" mà kiểu là
+      timestamp), `doctor_id` thành NOT NULL (khám không có bác sĩ thì không phải
+      hồ sơ bệnh án). Cả hai an toàn vì chưa có dữ liệu ở đâu
+    - **Chẩn đoán ĐÓNG BĂNG mã + tên ICD-10** tại thời điểm ghi, đồng thời vẫn
+      giữ tham chiếu. Bộ Y tế thu hồi một mã hay sửa lại tên tiếng Việt thì bản
+      ghi đã ký phải tiếp tục nói đúng điều bác sĩ đã ký — cùng lập luận với việc
+      đóng băng `purpose` của consent. Có test sửa tên trong danh mục rồi kiểm tra
+      bản ghi KHÔNG đổi theo
+    - **Nhiều nhất một chẩn đoán chính** ép bằng partial unique index; **đúng một**
+      thì kiểm lúc KÝ, không kiểm lúc insert. Bản nháp đang gõ dĩ nhiên có lúc
+      chưa có chẩn đoán nào, mà ràng buộc cấm điều đó sẽ làm chẩn đoán nhập đầu
+      tiên tự động thành chẩn đoán chính kèm một màn hai bước để sửa
+    - Cập nhật diagnoses là THAY TOÀN BỘ, không diff: chuyển cờ chính sang một
+      chẩn đoán đang là phụ chính là trường hợp mà diff sẽ đụng unique index
+    - `uq_encounter_appointment` partial HAI LẦN: `appointment_id` null với khách
+      đến trực tiếp, và bản đính chính là dòng riêng không được đụng dòng nó sửa.
+      Thiếu điều kiện thứ hai thì đính chính một bản ghi sinh từ lịch hẹn là
+      không thể — loại lỗi phát hiện muộn rồi sửa bằng cách bỏ ràng buộc
+    - **Tạo bản ghi BẮT BUỘC có consent** `TREATMENT` và `SENSITIVE_DATA`. Ghi bản
+      ghi lâm sàng chính là việc xử lý dữ liệu sức khoẻ mà phòng khám tồn tại để
+      làm, nên chốt kiểm tra đặt ở ĐIỂM XỬ LÝ, không phải chỉ ở một màn hình có
+      thể bỏ qua
+    - Controller khoá `hasAnyRole('DOCTOR','ADMIN')` ở mức class — một lượt khám
+      không có nửa hành chính nào để cho lễ tân xem, và `requireAccess` thoát sớm
+      với mọi vai trò ngoài DOCTOR (đúng bẫy mà endpoint dị ứng đã sập)
+    - Khám ghi ngày ở TƯƠNG LAI bị từ chối: một lượt khám chưa diễn ra là một lịch
+      hẹn, lẫn hai thứ là đưa việc chưa làm vào tiền sử bệnh
+    - `DuplicateEncounterException` → 409 kèm `existingEncounterId`. Unique index
+      một mình trả 500, tức nói server lỗi, trong khi nguyên nhân thường là bấm
+      nút hai lần và thứ người dùng cần là id bản ghi đã có để mở tiếp
+    - _Requirements: 13.1, 13.2, 13.6_
+
+  - [x] 3.2 JSON Schema cho dữ liệu lâm sàng — **XONG 25/10/2026**
+    - Bảng `clinical_data_schema` lưu schema theo chuyên khoa + phiên bản.
+      **Schema nằm trong DATABASE, không nằm trong classpath**: schema ship kèm
+      resource là schema thay đổi khi jar thay đổi, tức âm thầm định nghĩa lại
+      điều một bản ghi lịch sử lẽ ra phải chứa
+    - `com.networknt:json-schema-validator` **ghim 1.5.8, KHÔNG dùng nhánh 3.x**:
+      release note của 3.x nói có thay đổi API không tương thích, mà project đang
+      trên Spring Boot 3.2 — kiểm tra dữ liệu lâm sàng không phải chỗ để chạy theo
+      major version. 1.5.x hỗ trợ Draft 2020-12, đúng thứ các schema viết theo
+    - Mỗi encounter lưu `clinical_data_schema_id`. **Sửa bản nháp thì validate
+      theo phiên bản bản ghi đó MỞ RA, không phải phiên bản hiện hành**: công bố
+      schema mới giữa lúc đang khám không được làm bản nháp trên màn hình thành
+      không hợp lệ
+    - Dialect GHIM Draft 2020-12 ở code, không đọc `$schema` của tài liệu: để một
+      schema lưu trong DB tự chọn dialect là cho nó chọn dialect yếu hơn, và
+      "bản ghi này được validate theo dialect nào" không phải câu hỏi phòng khám
+      nên phải trả lời theo từng dòng
+    - Schema da liễu bản 1 ĐƯỢC seed (mô tả tổn thương, dạng, vị trí, % BSA, phân
+      độ, thang điểm, mức ngứa). Khác với nội dung consent và danh mục quốc gia:
+      đây không phải văn bản pháp lý cũng không phải sổ do Bộ ban hành, mà là mô
+      tả các trường một lượt khám da liễu ghi lại — và không có schema nào thì
+      không ghi được bản ghi khám nào cả
+    - Client render form TỪ schema được trả về, nên công bố phiên bản mới là đổi
+      màn hình mà không cần phát hành lại
+    - _Requirements: 13.3, 13.4, 13.5_
+
+  - [x] 3.3 Viết test cho encounter và clinical_data — **XONG 25/10/2026**
+    - `ClinicalDataSchemaPropertyTest` (11 test) + `EncounterIntegrationTest`
+      (22 test, DB `encounter_it`)
+    - **Vì sao phải là property test:** lỗi ở đây IM LẶNG. Dữ liệu không khớp
+      schema vẫn lưu vào cột `jsonb` hoàn hảo, nên một validator để lọt thứ đáng
+      lẽ phải chặn sẽ không để lại dấu vết nào cho tới khi có người cần dùng
+      trường đó và thấy "rất nặng" ở chỗ đáng lẽ là một mức phân độ
+    - Hai nửa của tính chất: thứ gì schema cho phép thì LUÔN được nhận, thứ gì
+      schema cấm thì LUÔN bị từ chối. Có test riêng cho tương thích ngược khi lên
+      phiên bản
+    - Lỗi validate trả về TOÀN BỘ danh sách, không phải lỗi đầu tiên: bác sĩ sửa
+      form mỗi lần một lỗi là bác sĩ kết luận form bị hỏng rồi ghi hết vào ô văn
+      bản tự do — đúng cái mà dữ liệu có cấu trúc tồn tại để tránh
+    - _Requirements: 13.2, 13.4, 13.5, 13.6_
+
+  - [ ] ~~3.1 Bản ghi khám cơ bản~~
     - Tạo `Encounter` entity, repository, service, controller ở trạng thái DRAFT
     - Tạo bảng `encounter_diagnosis` cho nhiều chẩn đoán, partial unique index đảm bảo đúng một chẩn đoán chính
     - Bổ sung sinh hiệu, lời dặn, hẹn tái khám, chuyển tuyến
